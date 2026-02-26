@@ -25,9 +25,10 @@ class Settings(BaseSettings):
     # Blackbird
     blackbird_enabled: bool = True
 
-    # Schedule (UTC)
-    scan_schedule_hour: int = 3
+    # Schedule (local timezone via TZ env var)
+    scan_schedule_hour: int = 1
     scan_schedule_minute: int = 0
+    tz: str = "Europe/Berlin"
 
     # Timeouts
     trufflehog_timeout: int = 300

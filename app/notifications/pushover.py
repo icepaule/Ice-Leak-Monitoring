@@ -20,38 +20,46 @@ def send_scan_notification(db: Session, scan: Scan):
         return
 
     new_findings = db.query(Finding).filter_by(scan_id=scan.id).all()
-    if not new_findings:
-        return
 
     # Check for verified findings (critical)
     verified = [f for f in new_findings if f.verified]
     has_verified = len(verified) > 0
 
-    # Build message
+    # Build message depending on findings
     if has_verified:
         title = f"VERIFIED Credentials gefunden! ({len(verified)})"
         priority = 1  # High priority with sound
-    else:
+    elif new_findings:
         title = f"{len(new_findings)} neue Findings"
         priority = 0
+    else:
+        title = f"Scan #{scan.id} abgeschlossen - keine Findings"
+        priority = -1  # Low priority, no sound
 
     # Severity breakdown
     critical = sum(1 for f in new_findings if f.severity == "critical")
     high = sum(1 for f in new_findings if f.severity == "high")
     medium = sum(1 for f in new_findings if f.severity == "medium")
 
-    # Repos involved
-    repo_ids = {f.repo_id for f in new_findings}
-    repos = db.query(DiscoveredRepo).filter(DiscoveredRepo.id.in_(repo_ids)).all()
-    repo_names = [r.full_name for r in repos[:5]]
+    if new_findings:
+        # Repos involved
+        repo_ids = {f.repo_id for f in new_findings}
+        repos = db.query(DiscoveredRepo).filter(DiscoveredRepo.id.in_(repo_ids)).all()
+        repo_names = [r.full_name for r in repos[:5]]
 
-    message = (
-        f"Scan #{scan.id} abgeschlossen\n"
-        f"Critical: {critical} | High: {high} | Medium: {medium}\n"
-        f"Repos: {', '.join(repo_names)}"
-    )
-    if len(repos) > 5:
-        message += f" (+{len(repos) - 5} weitere)"
+        message = (
+            f"Scan #{scan.id} abgeschlossen\n"
+            f"Critical: {critical} | High: {high} | Medium: {medium}\n"
+            f"Repos: {', '.join(repo_names)}"
+        )
+        if len(repos) > 5:
+            message += f" (+{len(repos) - 5} weitere)"
+    else:
+        message = (
+            f"Scan #{scan.id} abgeschlossen\n"
+            f"Repos gescannt: {scan.repos_scanned} | Gefunden: {scan.repos_found}\n"
+            f"Keine neuen Findings. Dauer: {scan.duration_seconds or 0:.0f}s"
+        )
 
     try:
         resp = httpx.post(

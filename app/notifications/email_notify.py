@@ -7,7 +7,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 from app.config import settings
-from app.models import Scan, Finding, DiscoveredRepo, NotificationLog
+from app.models import Scan, Finding, DiscoveredRepo, NotificationLog, OsintResult
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,148 @@ def _severity_badge(severity: str) -> str:
     )
 
 
+def _status_color(status: str) -> str:
+    return {
+        "clean": "#57ab5a",
+        "findings": "#f47067",
+        "low_relevance": "#768390",
+        "skipped": "#768390",
+        "unchanged": "#539bf5",
+        "pending": "#d29922",
+    }.get(status, "#768390")
+
+
+def _build_activity_summary_html(db: Session, scan: Scan) -> str:
+    """Build the scan activity summary section (repos breakdown, OSINT results)."""
+
+    # Repo status breakdown
+    total_repos = scan.repos_found or 0
+    scanned = scan.repos_scanned or 0
+
+    # Count repos by scan_status for this scan's timeframe
+    all_repos = db.query(DiscoveredRepo).all()
+    status_counts = {}
+    for r in all_repos:
+        s = r.scan_status or "pending"
+        status_counts[s] = status_counts.get(s, 0) + 1
+
+    unchanged = status_counts.get("unchanged", 0)
+    low_rel = status_counts.get("low_relevance", 0)
+    skipped = status_counts.get("skipped", 0)
+    clean = status_counts.get("clean", 0)
+    with_findings = status_counts.get("findings", 0)
+    dismissed_count = sum(1 for r in all_repos if r.is_dismissed)
+    forced_count = sum(1 for r in all_repos if r.ai_scan_enabled == 1)
+    blocked_count = sum(1 for r in all_repos if r.ai_scan_enabled == 0)
+
+    # OSINT results from this scan
+    osint_results = db.query(OsintResult).filter_by(scan_id=scan.id).all()
+    osint_by_module: dict[str, list] = {}
+    for o in osint_results:
+        osint_by_module.setdefault(o.module_key, []).append(o)
+
+    html = """
+<!-- Scan-Aktivitaeten -->
+<div style="padding:24px 32px;border-bottom:1px solid #d0d7de;">
+  <h2 style="margin:0 0 16px;font-size:18px;color:#1c2128;">Scan-Aktivitaeten</h2>
+
+  <!-- Repo Overview -->
+  <h3 style="margin:0 0 12px;font-size:15px;color:#1c2128;">Repository-Uebersicht</h3>
+  <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:16px;">
+    <tr style="background:#f6f8fa;">
+      <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #d0d7de;">Kategorie</th>
+      <th style="padding:8px 12px;text-align:right;border-bottom:2px solid #d0d7de;">Anzahl</th>
+      <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #d0d7de;">Beschreibung</th>
+    </tr>
+"""
+
+    rows = [
+        (total_repos, "Repos in GitHub-Suche gefunden", "#1c2128"),
+        (scanned, "Repos deep-gescannt (TruffleHog + Gitleaks + Custom)", "#57ab5a"),
+        (with_findings, "Repos mit offenen Findings", "#f47067"),
+        (clean, "Repos gescannt, keine Findings", "#57ab5a"),
+        (unchanged, "Repos uebersprungen (unveraendert seit letztem Scan)", "#539bf5"),
+        (low_rel, "Repos uebersprungen (KI-Score < 30%)", "#768390"),
+        (skipped, "Repos uebersprungen (zu gross oder gesperrt)", "#768390"),
+        (dismissed_count, "Repos als False Positive markiert", "#768390"),
+    ]
+
+    for count, desc, color in rows:
+        html += f"""
+    <tr>
+      <td style="padding:6px 12px;border-bottom:1px solid #d0d7de;font-weight:bold;color:{color};">{count}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #d0d7de;text-align:right;font-weight:bold;color:{color};">{count}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #d0d7de;color:#57606a;">{desc}</td>
+    </tr>
+"""
+
+    html += "  </table>\n"
+
+    # AI-Override status
+    if forced_count or blocked_count:
+        html += f"""
+  <p style="font-size:13px;color:#57606a;margin-bottom:16px;">
+    <strong>AI-Override:</strong>
+    {f'{forced_count} Repo(s) manuell zum Scan erzwungen' if forced_count else ''}
+    {' | ' if forced_count and blocked_count else ''}
+    {f'{blocked_count} Repo(s) manuell gesperrt' if blocked_count else ''}
+  </p>
+"""
+
+    # OSINT Results
+    if osint_results:
+        html += """
+  <h3 style="margin:16px 0 12px;font-size:15px;color:#1c2128;">OSINT-Aufklaerung</h3>
+  <table style="border-collapse:collapse;width:100%;font-size:13px;margin-bottom:16px;">
+    <tr style="background:#f6f8fa;">
+      <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #d0d7de;">Modul</th>
+      <th style="padding:8px 12px;text-align:right;border-bottom:2px solid #d0d7de;">Ergebnisse</th>
+      <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #d0d7de;">Typen</th>
+      <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #d0d7de;">Beispiele</th>
+    </tr>
+"""
+        for module, results in osint_by_module.items():
+            types = set(r.result_type or "unknown" for r in results)
+            examples = [r.result_value for r in results[:3]]
+            examples_str = ", ".join(examples)
+            if len(results) > 3:
+                examples_str += f" (+{len(results) - 3} weitere)"
+            html += f"""
+    <tr>
+      <td style="padding:6px 12px;border-bottom:1px solid #d0d7de;font-weight:bold;">{module}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #d0d7de;text-align:right;">{len(results)}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #d0d7de;color:#57606a;">{', '.join(types)}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #d0d7de;color:#57606a;font-size:12px;">{examples_str}</td>
+    </tr>
+"""
+        html += "  </table>\n"
+    else:
+        html += """
+  <p style="font-size:13px;color:#768390;margin:8px 0;">
+    OSINT-Aufklaerung: Keine Module aktiviert oder keine Ergebnisse.
+  </p>
+"""
+
+    # Scan metadata
+    duration_min = (scan.duration_seconds or 0) / 60
+    html += f"""
+  <h3 style="margin:16px 0 12px;font-size:15px;color:#1c2128;">Scan-Details</h3>
+  <table style="border-collapse:collapse;font-size:13px;">
+    <tr><td style="padding:4px 16px 4px 0;color:#57606a;">Scan-ID:</td><td style="padding:4px 0;font-weight:bold;">#{scan.id}</td></tr>
+    <tr><td style="padding:4px 16px 4px 0;color:#57606a;">Typ:</td><td style="padding:4px 0;">{scan.trigger_type.capitalize()}</td></tr>
+    <tr><td style="padding:4px 16px 4px 0;color:#57606a;">Gestartet:</td><td style="padding:4px 0;">{scan.started_at}</td></tr>
+    <tr><td style="padding:4px 16px 4px 0;color:#57606a;">Beendet:</td><td style="padding:4px 0;">{scan.finished_at}</td></tr>
+    <tr><td style="padding:4px 16px 4px 0;color:#57606a;">Dauer:</td><td style="padding:4px 0;">{duration_min:.1f} Minuten ({scan.duration_seconds or 0:.0f}s)</td></tr>
+    <tr><td style="padding:4px 16px 4px 0;color:#57606a;">Keywords:</td><td style="padding:4px 0;">{scan.keywords_used}</td></tr>
+    <tr><td style="padding:4px 16px 4px 0;color:#57606a;">Status:</td><td style="padding:4px 0;">{scan.status}</td></tr>
+  </table>
+</div>
+"""
+    return html
+
+
 def _build_ciso_email_html(db: Session, scan: Scan, findings: list[Finding]) -> str:
-    """Build CISO-ready HTML email with full keyword traceability and regulatory assessment."""
+    """Build CISO-ready HTML email with activity summary, findings, and regulatory assessment."""
 
     now = datetime.utcnow().strftime("%d.%m.%Y %H:%M UTC")
 
@@ -48,6 +188,17 @@ def _build_ciso_email_html(db: Session, scan: Scan, findings: list[Finding]) -> 
     low = sum(1 for f in findings if f.severity in ("low", "info"))
     verified_count = sum(1 for f in findings if f.verified)
 
+    # Status line
+    if not findings:
+        status_line = "Keine neuen Findings &mdash; keine Handlung erforderlich."
+        status_bg = "#57ab5a"
+    elif verified_count:
+        status_line = f'<span style="color:#f47067;font-weight:bold;">{verified_count} verifizierte Credentials gefunden &mdash; sofortige Handlung erforderlich!</span>'
+        status_bg = "#f47067"
+    else:
+        status_line = f"{len(findings)} neue Findings zur Bewertung."
+        status_bg = "#d29922"
+
     # Build HTML
     html = f"""<!DOCTYPE html>
 <html>
@@ -61,12 +212,18 @@ def _build_ciso_email_html(db: Session, scan: Scan, findings: list[Finding]) -> 
   <p style="margin:8px 0 0;color:#768390;font-size:14px;">
     Scan #{scan.id} | {scan.trigger_type.capitalize()} | {now}
     | Dauer: {scan.duration_seconds or 0:.0f}s
+    | Keywords: {scan.keywords_used} | Repos gescannt: {scan.repos_scanned}
   </p>
+</div>
+
+<!-- Status Banner -->
+<div style="background:{status_bg};color:#fff;padding:14px 32px;font-size:15px;font-weight:bold;">
+  {status_line}
 </div>
 
 <!-- Executive Summary -->
 <div style="padding:24px 32px;border-bottom:1px solid #d0d7de;">
-  <h2 style="margin:0 0 16px;font-size:18px;color:#1c2128;">Zusammenfassung fuer CISO</h2>
+  <h2 style="margin:0 0 16px;font-size:18px;color:#1c2128;">Zusammenfassung</h2>
   <table style="border-collapse:collapse;width:100%;">
     <tr>
       <td style="padding:12px;text-align:center;background:#f47067;color:#fff;border-radius:4px 0 0 4px;width:25%;">
@@ -90,37 +247,45 @@ def _build_ciso_email_html(db: Session, scan: Scan, findings: list[Finding]) -> 
   <p style="margin:16px 0 0;font-size:14px;color:#57606a;">
     <strong>{len(findings)}</strong> neue Findings in
     <strong>{len(repo_findings)}</strong> Repositories.
-    {f'<span style="color:#f47067;font-weight:bold;">{verified_count} verifizierte Credentials!</span>' if verified_count else ''}
     | Keywords gesucht: <strong>{scan.keywords_used}</strong>
     | Repos gescannt: <strong>{scan.repos_scanned}</strong>
+    | Repos gefunden: <strong>{scan.repos_found}</strong>
   </p>
 </div>
+"""
 
+    # Activity summary section
+    html += _build_activity_summary_html(db, scan)
+
+    # Findings section
+    if findings:
+        html += """
 <!-- Findings by Repository -->
 <div style="padding:24px 32px;">
   <h2 style="margin:0 0 16px;font-size:18px;color:#1c2128;">Detaillierte Findings</h2>
 """
 
-    for repo_id, repo_f_list in repo_findings.items():
-        repo = db.query(DiscoveredRepo).get(repo_id)
-        if not repo:
-            continue
+        for repo_id, repo_f_list in repo_findings.items():
+            repo = db.query(DiscoveredRepo).get(repo_id)
+            if not repo:
+                continue
 
-        # Keyword traceability
-        try:
-            matched_kw = json.loads(repo.matched_keywords or "[]")
-        except (json.JSONDecodeError, TypeError):
-            matched_kw = []
+            # Keyword traceability
+            try:
+                matched_kw = json.loads(repo.matched_keywords or "[]")
+            except (json.JSONDecodeError, TypeError):
+                matched_kw = []
 
-        kw_badges = " ".join(
-            f'<span style="background:#2d333b;color:#539bf5;padding:2px 6px;'
-            f'border-radius:3px;font-size:11px;margin-right:4px;">{kw}</span>'
-            for kw in matched_kw
-        )
+            kw_badges = " ".join(
+                f'<span style="background:#2d333b;color:#539bf5;padding:2px 6px;'
+                f'border-radius:3px;font-size:11px;margin-right:4px;">{kw}</span>'
+                for kw in matched_kw
+            )
 
-        ai_score_display = f"{repo.ai_relevance:.1%}" if repo.ai_relevance is not None else "N/A"
+            ai_score_display = f"{repo.ai_relevance:.1%}" if repo.ai_relevance is not None else "N/A"
+            ai_summary_text = repo.ai_summary or ""
 
-        html += f"""
+            html += f"""
   <div style="border:1px solid #d0d7de;border-radius:6px;margin-bottom:20px;overflow:hidden;">
     <!-- Repo Header -->
     <div style="background:#f6f8fa;padding:16px;border-bottom:1px solid #d0d7de;">
@@ -133,15 +298,16 @@ def _build_ciso_email_html(db: Session, scan: Scan, findings: list[Finding]) -> 
       <p style="margin:8px 0 4px;font-size:13px;color:#57606a;">
         {repo.description or 'Keine Beschreibung'}
       </p>
+      {f'<p style="margin:4px 0;font-size:12px;color:#57606a;"><strong>KI-Einschaetzung:</strong> {ai_summary_text}</p>' if ai_summary_text else ''}
       <div style="margin-top:8px;">
         <strong style="font-size:12px;color:#1c2128;">Gefunden durch Keywords:</strong>
         {kw_badges}
       </div>
       <p style="margin:4px 0 0;font-size:12px;color:#57606a;">
-        <strong>Beweiskette:</strong> Die Keywords {', '.join(f'"{kw}"' for kw in matched_kw)}
+        <strong>Herleitung:</strong> Die Keywords {', '.join(f'"{kw}"' for kw in matched_kw)}
         haben dieses Repository in der GitHub Code Search API identifiziert.
         Der Code dieses Repos enthaelt Treffer fuer diese Suchbegriffe,
-        die mit der Muenchener Hypothekenbank eG oder ihren Dienstleistern in Verbindung stehen.
+        die mit der Organisation oder ihren Dienstleistern in Verbindung stehen.
       </p>
     </div>
 
@@ -156,9 +322,9 @@ def _build_ciso_email_html(db: Session, scan: Scan, findings: list[Finding]) -> 
       </tr>
 """
 
-        for f in sorted(repo_f_list, key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(x.severity, 5)):
-            verified_icon = "&#x2705; JA" if f.verified else "&#x274C; Nein"
-            html += f"""
+            for f in sorted(repo_f_list, key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(x.severity, 5)):
+                verified_icon = "&#x2705; JA" if f.verified else "&#x274C; Nein"
+                html += f"""
       <tr>
         <td style="padding:8px 12px;border-bottom:1px solid #d0d7de;">{_severity_badge(f.severity)}</td>
         <td style="padding:8px 12px;border-bottom:1px solid #d0d7de;">{f.scanner}</td>
@@ -168,10 +334,10 @@ def _build_ciso_email_html(db: Session, scan: Scan, findings: list[Finding]) -> 
       </tr>
 """
 
-            # AI Assessment (MITRE/DORA/BaFin) per finding
-            if f.ai_assessment:
-                escaped_assessment = f.ai_assessment.replace("\n", "<br>")
-                html += f"""
+                # AI Assessment (MITRE/DORA/BaFin) per finding
+                if f.ai_assessment:
+                    escaped_assessment = f.ai_assessment.replace("\n", "<br>")
+                    html += f"""
       <tr>
         <td colspan="5" style="padding:12px 16px;background:#f8f9fb;border-bottom:1px solid #d0d7de;">
           <details open>
@@ -186,15 +352,29 @@ def _build_ciso_email_html(db: Session, scan: Scan, findings: list[Finding]) -> 
       </tr>
 """
 
-        html += """
+            html += """
     </table>
   </div>
 """
 
-    # Regulatory footer
+        html += "</div>\n"
+
+    else:
+        # No findings section
+        html += """
+<div style="padding:24px 32px;border-bottom:1px solid #d0d7de;">
+  <h2 style="margin:0 0 12px;font-size:18px;color:#1c2128;">Findings</h2>
+  <p style="font-size:14px;color:#57ab5a;font-weight:bold;">
+    Keine neuen Findings in diesem Scan-Durchlauf. Alle geprueften Repositories sind sauber.
+  </p>
+</div>
+"""
+
+    # Regulatory footer (always show)
     html += """
-  <!-- Regulatory Note -->
-  <div style="background:#fff8c5;border:1px solid #d4a72c;border-radius:6px;padding:16px;margin-top:24px;">
+<!-- Regulatory Note -->
+<div style="padding:24px 32px;">
+  <div style="background:#fff8c5;border:1px solid #d4a72c;border-radius:6px;padding:16px;">
     <h3 style="margin:0 0 8px;font-size:14px;color:#1c2128;">Regulatorische Hinweise</h3>
     <ul style="margin:0;padding-left:20px;font-size:13px;color:#57606a;line-height:1.8;">
       <li><strong>DORA (Digital Operational Resilience Act):</strong>
@@ -218,7 +398,6 @@ def _build_ciso_email_html(db: Session, scan: Scan, findings: list[Finding]) -> 
   <p style="margin:0;font-size:12px;color:#768390;">
     Automatisch generiert von Ice-Leak-Monitor |
     Dieser Bericht ist vertraulich und nur fuer den internen Gebrauch bestimmt.
-    <br>Muenchener Hypothekenbank eG &mdash; IT-Sicherheit
   </p>
 </div>
 
@@ -230,23 +409,24 @@ def _build_ciso_email_html(db: Session, scan: Scan, findings: list[Finding]) -> 
 
 
 def send_scan_email(db: Session, scan: Scan):
-    """Send CISO-ready email with scan findings."""
+    """Send CISO-ready email report after every scan (with or without findings)."""
     if not settings.smtp_host or not settings.alert_email_to:
         logger.info("SMTP not configured, skipping email")
         _log_notification(db, scan.id, "email", "SMTP not configured", "skipped")
         return
 
     new_findings = db.query(Finding).filter_by(scan_id=scan.id).all()
-    if not new_findings:
-        return
 
     verified = [f for f in new_findings if f.verified]
     has_verified = len(verified) > 0
 
+    # Subject line depends on findings
     if has_verified:
         subject = f"[IceLeakMonitor] VERIFIED Credentials gefunden! ({len(verified)} verifiziert, {len(new_findings)} gesamt)"
-    else:
+    elif new_findings:
         subject = f"[IceLeakMonitor] {len(new_findings)} neue Findings - Scan #{scan.id}"
+    else:
+        subject = f"[IceLeakMonitor] Scan #{scan.id} abgeschlossen - keine neuen Findings"
 
     html_body = _build_ciso_email_html(db, scan, new_findings)
 
@@ -257,11 +437,19 @@ def send_scan_email(db: Session, scan: Scan):
     msg["X-Priority"] = "1" if has_verified else "3"
 
     # Plain text fallback
-    plain = (
-        f"Ice-Leak-Monitor Scan #{scan.id}\n"
-        f"{len(new_findings)} neue Findings in {scan.repos_scanned} Repos.\n"
-        f"Details im Web-Dashboard oder in der HTML-Version dieser E-Mail."
-    )
+    if new_findings:
+        plain = (
+            f"Ice-Leak-Monitor Scan #{scan.id}\n"
+            f"{len(new_findings)} neue Findings in {scan.repos_scanned} Repos.\n"
+            f"Details im Web-Dashboard oder in der HTML-Version dieser E-Mail."
+        )
+    else:
+        plain = (
+            f"Ice-Leak-Monitor Scan #{scan.id} abgeschlossen.\n"
+            f"Keine neuen Findings. {scan.repos_scanned} Repos gescannt, "
+            f"{scan.repos_found} Repos gefunden.\n"
+            f"Dauer: {scan.duration_seconds or 0:.0f}s"
+        )
     msg.attach(MIMEText(plain, "plain", "utf-8"))
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 

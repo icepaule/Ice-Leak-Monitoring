@@ -481,18 +481,17 @@ def run_scan_pipeline(db: Session, trigger_type: str = "manual"):
         scan_progress.update(4, message="Notifications senden...")
         scan_progress.add_log("Stage 4: Abschluss & Benachrichtigungen")
 
-        # Trigger notifications if there are new findings
-        if new_findings_count > 0:
-            try:
-                from app.notifications.pushover import send_scan_notification
-                from app.notifications.email_notify import send_scan_email
-                scan_progress.add_log(f"Sende Benachrichtigung ({new_findings_count} neue Findings)")
-                send_scan_notification(db, scan)
-                send_scan_email(db, scan)
-                scan_progress.add_log("Benachrichtigungen gesendet")
-            except Exception:
-                scan_progress.add_log("Benachrichtigung fehlgeschlagen")
-                logger.exception("Notification dispatch failed")
+        # Always send notifications (report with all activities)
+        try:
+            from app.notifications.pushover import send_scan_notification
+            from app.notifications.email_notify import send_scan_email
+            scan_progress.add_log(f"Sende Scan-Bericht ({new_findings_count} neue Findings, {scanned_count} Repos)")
+            send_scan_notification(db, scan)
+            send_scan_email(db, scan)
+            scan_progress.add_log("Scan-Bericht gesendet")
+        except Exception:
+            scan_progress.add_log("Scan-Bericht konnte nicht gesendet werden")
+            logger.exception("Notification dispatch failed")
 
         scan_progress.add_log(f"Scan abgeschlossen: {scanned_count} Repos, {new_findings_count} Findings, {duration:.1f}s")
         scan_progress.add_activity("done", f"Scan fertig: {scanned_count} Repos, {new_findings_count} Findings, {duration:.0f}s")

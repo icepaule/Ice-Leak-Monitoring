@@ -16,7 +16,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("iceleakmonitor")
 
-scheduler = BackgroundScheduler(timezone="UTC")
+scheduler = BackgroundScheduler(timezone=settings.tz)
 
 
 def scheduled_scan():
@@ -61,9 +61,10 @@ async def lifespan(app: FastAPI):
     )
     scheduler.start()
     logger.info(
-        "Scheduler started - daily scan at %02d:%02d UTC",
+        "Scheduler started - daily scan at %02d:%02d %s",
         settings.scan_schedule_hour,
         settings.scan_schedule_minute,
+        settings.tz,
     )
 
     yield
