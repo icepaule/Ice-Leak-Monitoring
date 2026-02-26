@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Repositories - Ice-Leak-Monitor{% endblock %}
+
+{% block content %}
+<h1>Gefundene Repositories</h1>
+
+<!-- Filters -->
+<div class="card filter-bar">
+    <form method="GET" action="/repos" class="form-inline">
+        <select name="status" class="input select" onchange="this.form.submit()">
+            <option value="">Alle Status</option>
+            <option value="pending" {% if current_status == 'pending' %}selected{% endif %}>Pending</option>
+            <option value="clean" {% if current_status == 'clean' %}selected{% endif %}>Clean</option>
+            <option value="findings" {% if current_status == 'findings' %}selected{% endif %}>Findings</option>
+            <option value="low_relevance" {% if current_status == 'low_relevance' %}selected{% endif %}>Low Relevance</option>
+        </select>
+        <select name="sort" class="input select" onchange="this.form.submit()">
+            <option value="last_seen" {% if current_sort == 'last_seen' %}selected{% endif %}>Zuletzt gesehen</option>
+            <option value="name" {% if current_sort == 'name' %}selected{% endif %}>Name</option>
+            <option value="size" {% if current_sort == 'size' %}selected{% endif %}>Groesse</option>
+            <option value="ai_score" {% if current_sort == 'ai_score' %}selected{% endif %}>AI Score</option>
+        </select>
+    </form>
+</div>
+
+<!-- Bulk Actions Bar -->
+<div id="bulk-actions" class="bulk-actions hidden">
+    <span id="bulk-count">0</span> Matches ausgewaehlt:
+    <button class="btn btn-sm btn-danger" onclick="bulkToggleMatches('deactivate')">Als False Positive markieren</button>
+    <button class="btn btn-sm btn-primary" onclick="bulkToggleMatches('activate')">Aktivieren</button>
+    <button class="btn btn-sm btn-secondary" onclick="clearMatchSelection()">Auswahl aufheben</button>
+</div>
+
+<!-- Repos Table -->
+<div class="card">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Repository</th>
+                <th>Owner</th>
+                <th>Groesse</th>
+                <th>Sprache</th>
+                <th>Keyword-Bezug</th>
+                <th>Status</th>
+                <th>AI Score</th>
+                <th>Findings</th>
+                <th>Letzter Scan</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for repo in repos %}
+            <tr class="{% if repo.is_dismissed %}row-disabled{% endif %}">
+                <td>
+                    <a href="/repos/{{ repo.id }}">{{ repo.full_name }}</a>
+                    {% if repo.is_fork %}<span class="badge badge-info">Fork</span>{% endif %}
+                </td>
+                <td>
+                    {{ repo.owner_login }}
+                    {% if repo.ai_summary %}
+                    <div class="repo-reason text-muted" title="{{ repo.ai_summary }}">{{ repo.ai_summary[:80] }}{% if repo.ai_summary|length > 80 %}...{% endif %}</div>
+                    {% endif %}
+                </td>
+                <td>{{ "%.1f"|format((repo.repo_size_kb or 0) / 1024) }} MB</td>
+                <td>{{ repo.language or '-' }}</td>
+                <td class="match-cell">
+                    {% if repo.kw_matches %}
+                        {% for m in repo.kw_matches %}
+                        <div class="match-row {% if not m.is_active %}match-inactive{% endif %}">
+                            <label class="match-checkbox-label">
+                                <input type="checkbox" class="match-cb" value="{{ m.id }}" onchange="updateBulkBar()">
+                                <span class="badge {% if m.is_active %}badge-keyword{% else %}badge-fp{% endif %}">{{ m.keyword }}</span>
+                            </label>
+                            <span class="match-source badge badge-category">{{ m.match_source }}</span>
+                            {% if m.files_list %}
+                            <details class="match-details">
+                                <summary>{{ m.files_list|length }} Datei(en)</summary>
+                                <ul class="match-files">
+                                    {% for f in m.files_list[:5] %}
+                                    <li><code>{{ f }}</code></li>
+                                    {% endfor %}
+                                    {% if m.files_list|length > 5 %}
+                                    <li class="text-muted">+{{ m.files_list|length - 5 }} weitere</li>
+                                    {% endif %}
+                                </ul>
+                            </details>
+                            {% endif %}
+                            <button class="btn btn-sm match-toggle {% if m.is_active %}btn-secondary{% else %}btn-primary{% endif %}"
+                                    onclick="toggleMatch({{ m.id }}, this)"
+                                    title="{{ 'Als False Positive markieren' if m.is_active else 'Aktivieren' }}">
+                                {{ 'FP' if m.is_active else '\u2714' }}
+                            </button>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        {% for kw in repo.keywords_list[:3] %}
+                        <span class="badge badge-keyword">{{ kw }}</span>
+                        {% endfor %}
+                        {% if repo.keywords_list|length > 3 %}
+                        <span class="badge badge-info">+{{ repo.keywords_list|length - 3 }}</span>
+                        {% endif %}
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="badge badge-{{ repo.scan_status or 'pending' }}">
+                        {{ repo.scan_status or 'pending' }}
+                    </span>
+                </td>
+                <td>
+                    {% if repo.ai_relevance is not none %}
+                        <span class="ai-score {% if repo.ai_relevance >= 0.6 %}score-high{% elif repo.ai_relevance >= 0.3 %}score-mid{% else %}score-low{% endif %}">
+                            {{ "%.0f"|format(repo.ai_relevance * 100) }}%
+                        </span>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>
+                    {% if repo.finding_count > 0 %}
+                    <span class="badge badge-findings">{{ repo.finding_count }}</span>
+                    {% else %}
+                    0
+                    {% endif %}
+                </td>
+                <td>{{ repo.last_scanned_at or 'Noch nicht' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if not repos %}
+    <p class="empty-state">Keine Repositories gefunden. Fuege Keywords hinzu und starte einen Scan.</p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleMatch(matchId, btn) {
+    fetch('/repos/matches/' + matchId, { method: 'PATCH' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) location.reload();
+        });
+}
+
+function updateBulkBar() {
+    var checked = document.querySelectorAll('.match-cb:checked');
+    var bar = document.getElementById('bulk-actions');
+    var count = document.getElementById('bulk-count');
+    if (bar) {
+        bar.classList.toggle('hidden', checked.length === 0);
+    }
+    if (count) {
+        count.textContent = checked.length;
+    }
+}
+
+function getSelectedMatchIds() {
+    var checked = document.querySelectorAll('.match-cb:checked');
+    var ids = [];
+    checked.forEach(function(cb) { ids.push(parseInt(cb.value, 10)); });
+    return ids;
+}
+
+function bulkToggleMatches(action) {
+    var ids = getSelectedMatchIds();
+    if (ids.length === 0) return;
+    fetch('/repos/matches/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ match_ids: ids, action: action })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) location.reload();
+    });
+}
+
+function clearMatchSelection() {
+    var cbs = document.querySelectorAll('.match-cb:checked');
+    cbs.forEach(function(cb) { cb.checked = false; });
+    updateBulkBar();
+}
+</script>
+{% endblock %}

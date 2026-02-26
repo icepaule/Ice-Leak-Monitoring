@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Findings - Ice-Leak-Monitor{% endblock %}
+
+{% block content %}
+<h1>Findings</h1>
+
+<!-- Filters -->
+<div class="card filter-bar">
+    <form method="GET" action="/findings" class="form-inline">
+        <select name="scanner" class="input select" onchange="this.form.submit()">
+            <option value="">Alle Scanner</option>
+            <option value="trufflehog" {% if current_scanner == 'trufflehog' %}selected{% endif %}>TruffleHog</option>
+            <option value="gitleaks" {% if current_scanner == 'gitleaks' %}selected{% endif %}>Gitleaks</option>
+            <option value="custom" {% if current_scanner == 'custom' %}selected{% endif %}>Custom</option>
+        </select>
+        <select name="severity" class="input select" onchange="this.form.submit()">
+            <option value="">Alle Severities</option>
+            <option value="critical" {% if current_severity == 'critical' %}selected{% endif %}>Critical</option>
+            <option value="high" {% if current_severity == 'high' %}selected{% endif %}>High</option>
+            <option value="medium" {% if current_severity == 'medium' %}selected{% endif %}>Medium</option>
+            <option value="low" {% if current_severity == 'low' %}selected{% endif %}>Low</option>
+        </select>
+        <select name="status" class="input select" onchange="this.form.submit()">
+            <option value="open" {% if current_status == 'open' %}selected{% endif %}>Offen</option>
+            <option value="resolved" {% if current_status == 'resolved' %}selected{% endif %}>Resolved</option>
+            <option value="all" {% if current_status == 'all' %}selected{% endif %}>Alle</option>
+        </select>
+    </form>
+</div>
+
+<!-- Findings Table -->
+<div class="card">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Repository</th>
+                <th>Scanner</th>
+                <th>Detektor</th>
+                <th>Datei</th>
+                <th>Severity</th>
+                <th>Verifiziert</th>
+                <th>AI-Bewertung</th>
+                <th>Status</th>
+                <th>Aktion</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in findings %}
+            <tr class="{% if f.is_resolved %}row-resolved{% endif %}">
+                <td>{{ f.id }}</td>
+                <td>
+                    {% if f.repo %}
+                    <a href="/repos/{{ f.repo_id }}">{{ f.repo.full_name }}</a>
+                    {% else %}
+                    #{{ f.repo_id }}
+                    {% endif %}
+                </td>
+                <td>{{ f.scanner }}</td>
+                <td><code>{{ f.detector_name }}</code></td>
+                <td><code>{{ (f.file_path or '-')[:40] }}</code></td>
+                <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
+                <td>{{ "Ja" if f.verified else "Nein" }}</td>
+                <td>
+                    {% if f.ai_assessment %}
+                    <span class="badge badge-info" title="{{ f.ai_assessment[:200] }}">AI</span>
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="badge {% if f.is_resolved %}badge-completed{% else %}badge-running{% endif %}">
+                        {{ "Resolved" if f.is_resolved else "Open" }}
+                    </span>
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-secondary" onclick="toggleFinding({{ f.id }})">
+                        {{ "Reopen" if f.is_resolved else "Resolve" }}
+                    </button>
+                </td>
+            </tr>
+            {% if f.ai_assessment %}
+            <tr class="ai-row">
+                <td colspan="10">
+                    <details>
+                        <summary>KI-Bewertung (MITRE/DORA/BaFin)</summary>
+                        <pre class="ai-assessment">{{ f.ai_assessment }}</pre>
+                    </details>
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if not findings %}
+    <p class="empty-state">Keine Findings mit diesen Filtern gefunden.</p>
+    {% endif %}
+</div>
+{% endblock %}

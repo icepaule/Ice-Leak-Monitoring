@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}{{ repo.full_name }} - Ice-Leak-Monitor{% endblock %}
+
+{% block content %}
+<h1>
+    <a href="/repos">&larr;</a>
+    {{ repo.full_name }}
+    <span class="badge badge-{{ repo.scan_status or 'pending' }}">{{ repo.scan_status or 'pending' }}</span>
+</h1>
+
+<!-- Repo Info -->
+<div class="card">
+    <div class="repo-info-grid">
+        <div>
+            <strong>URL:</strong> <a href="{{ repo.html_url }}" target="_blank">{{ repo.html_url }}</a>
+        </div>
+        <div><strong>Owner:</strong> {{ repo.owner_login }} ({{ repo.owner_type }})</div>
+        <div><strong>Sprache:</strong> {{ repo.language or '-' }}</div>
+        <div><strong>Groesse:</strong> {{ "%.1f"|format((repo.repo_size_kb or 0) / 1024) }} MB</div>
+        <div><strong>Stars:</strong> {{ repo.stargazers }}</div>
+        <div><strong>Fork:</strong> {{ "Ja" if repo.is_fork else "Nein" }}</div>
+        <div><strong>Zuerst gesehen:</strong> {{ repo.first_seen_at }}</div>
+        <div><strong>Zuletzt gesehen:</strong> {{ repo.last_seen_at }}</div>
+        <div><strong>Letzter Scan:</strong> {{ repo.last_scanned_at or 'Noch nicht' }}</div>
+        <div><strong>Scan-Dauer:</strong> {{ "%.1f"|format(repo.scan_duration_s or 0) }}s</div>
+    </div>
+
+    {% if repo.ai_relevance is not none %}
+    <div class="mt-16">
+        <strong>AI Relevanz:</strong>
+        <span class="ai-score {% if repo.ai_relevance >= 0.6 %}score-high{% elif repo.ai_relevance >= 0.3 %}score-mid{% else %}score-low{% endif %}">
+            {{ "%.0f"|format(repo.ai_relevance * 100) }}%
+        </span>
+    </div>
+    {% endif %}
+
+    {% if repo.ai_summary %}
+    <div class="mt-16">
+        <strong>AI Bewertung:</strong>
+        <p class="ai-text">{{ repo.ai_summary }}</p>
+    </div>
+    {% endif %}
+
+    <div class="mt-16">
+        <strong>Beschreibung:</strong>
+        <p>{{ repo.description or 'Keine Beschreibung' }}</p>
+    </div>
+
+    <div class="mt-16">
+        <button class="btn {% if repo.is_dismissed %}btn-primary{% else %}btn-secondary{% endif %}"
+                onclick="dismissRepo({{ repo.id }})">
+            {{ "Wiederherstellen" if repo.is_dismissed else "Als False Positive markieren" }}
+        </button>
+    </div>
+</div>
+
+<!-- Keyword Matches -->
+<div class="card">
+    <h2>Keyword-Bezuege ({{ repo.kw_matches|length if repo.kw_matches else 0 }})</h2>
+    {% if repo.kw_matches %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Keyword</th>
+                <th>Quelle</th>
+                <th>Bezug / Dateien</th>
+                <th>Status</th>
+                <th>Aktion</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in repo.kw_matches %}
+            <tr class="{% if not m.is_active %}row-disabled{% endif %}">
+                <td><span class="badge {% if m.is_active %}badge-keyword{% else %}badge-fp{% endif %}">{{ m.keyword }}</span></td>
+                <td><span class="badge badge-category">{{ m.match_source }}</span></td>
+                <td>
+                    {% if m.match_context %}
+                    <span>{{ m.match_context }}</span>
+                    {% endif %}
+                    {% if m.files_list %}
+                    <details class="mt-4">
+                        <summary class="text-muted">{{ m.files_list|length }} Datei(en) anzeigen</summary>
+                        <ul class="match-files">
+                            {% for f in m.files_list %}
+                            <li><code>{{ f }}</code></li>
+                            {% endfor %}
+                        </ul>
+                    </details>
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="badge {% if m.is_active %}badge-completed{% else %}badge-failed{% endif %}">
+                        {{ "Aktiv" if m.is_active else "False Positive" }}
+                    </span>
+                </td>
+                <td>
+                    <button class="btn btn-sm {% if m.is_active %}btn-secondary{% else %}btn-primary{% endif %}"
+                            onclick="toggleMatchDetail({{ m.id }})">
+                        {{ "FP markieren" if m.is_active else "Aktivieren" }}
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="mt-16">
+        <strong>Matched Keywords (Legacy):</strong>
+        {% for kw in repo.keywords_list %}
+        <span class="badge badge-keyword">{{ kw }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Findings -->
+<div class="card">
+    <h2>Findings ({{ findings|length }})</h2>
+    {% if findings %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Scanner</th>
+                <th>Detektor</th>
+                <th>Datei</th>
+                <th>Zeile</th>
+                <th>Severity</th>
+                <th>Verifiziert</th>
+                <th>Status</th>
+                <th>Aktion</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in findings %}
+            <tr class="{% if f.is_resolved %}row-resolved{% endif %}">
+                <td>{{ f.id }}</td>
+                <td>{{ f.scanner }}</td>
+                <td><code>{{ f.detector_name }}</code></td>
+                <td><code>{{ f.file_path or '-' }}</code></td>
+                <td>{{ f.line_number or '-' }}</td>
+                <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
+                <td>{{ "Ja" if f.verified else "Nein" }}</td>
+                <td>
+                    <span class="badge {% if f.is_resolved %}badge-completed{% else %}badge-running{% endif %}">
+                        {{ "Resolved" if f.is_resolved else "Open" }}
+                    </span>
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-secondary" onclick="toggleFinding({{ f.id }})">
+                        {{ "Reopen" if f.is_resolved else "Resolve" }}
+                    </button>
+                </td>
+            </tr>
+            {% if f.ai_assessment %}
+            <tr class="ai-row">
+                <td colspan="9">
+                    <details>
+                        <summary>KI-Bewertung (MITRE/DORA/BaFin)</summary>
+                        <pre class="ai-assessment">{{ f.ai_assessment }}</pre>
+                    </details>
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">Keine Findings fuer dieses Repository.</p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleMatchDetail(matchId) {
+    fetch('/repos/matches/' + matchId, { method: 'PATCH' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) location.reload();
+        });
+}
+</script>
+{% endblock %}

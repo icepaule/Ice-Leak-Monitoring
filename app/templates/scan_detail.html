@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Scan #{{ scan.id }} - Ice-Leak-Monitor{% endblock %}
+
+{% block content %}
+<h1>
+    <a href="/scans">&larr;</a>
+    Scan #{{ scan.id }}
+    <span class="badge badge-{{ scan.status }}">{{ scan.status }}</span>
+</h1>
+
+<!-- Scan Info -->
+<div class="card">
+    <div class="repo-info-grid">
+        <div><strong>Typ:</strong> {{ scan.trigger_type }}</div>
+        <div><strong>Gestartet:</strong> {{ scan.started_at }}</div>
+        <div><strong>Beendet:</strong> {{ scan.finished_at or 'Laeuft noch...' }}</div>
+        <div><strong>Dauer:</strong> {{ "%.0f"|format(scan.duration_seconds or 0) }}s</div>
+        <div><strong>Keywords gesucht:</strong> {{ scan.keywords_used or 0 }}</div>
+        <div><strong>Repos gefunden:</strong> {{ scan.repos_found or 0 }}</div>
+        <div><strong>Repos gescannt:</strong> {{ scan.repos_scanned or 0 }}</div>
+        <div><strong>Neue Findings:</strong> {{ scan.new_findings or 0 }}</div>
+        <div><strong>Gesamt Findings:</strong> {{ scan.total_findings or 0 }}</div>
+    </div>
+
+    {% if scan.error_message %}
+    <div class="mt-16 alert alert-danger">
+        <strong>Fehler:</strong> {{ scan.error_message }}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Findings from this scan -->
+<div class="card">
+    <h2>Findings aus diesem Scan ({{ findings|length }})</h2>
+    {% if findings %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Repository</th>
+                <th>Scanner</th>
+                <th>Detektor</th>
+                <th>Datei</th>
+                <th>Severity</th>
+                <th>Verifiziert</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in findings %}
+            <tr class="{% if f.is_resolved %}row-resolved{% endif %}">
+                <td>
+                    {% if f.repo %}
+                    <a href="/repos/{{ f.repo_id }}">{{ f.repo.full_name }}</a>
+                    {% else %}
+                    #{{ f.repo_id }}
+                    {% endif %}
+                </td>
+                <td>{{ f.scanner }}</td>
+                <td><code>{{ f.detector_name }}</code></td>
+                <td><code>{{ (f.file_path or '-')[:40] }}</code></td>
+                <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
+                <td>{{ "Ja" if f.verified else "Nein" }}</td>
+                <td>
+                    <span class="badge {% if f.is_resolved %}badge-completed{% else %}badge-running{% endif %}">
+                        {{ "Resolved" if f.is_resolved else "Open" }}
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">Keine Findings in diesem Scan.</p>
+    {% endif %}
+</div>
+
+<!-- Notifications -->
+<div class="card">
+    <h2>Benachrichtigungen</h2>
+    {% if notifications %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Kanal</th>
+                <th>Betreff</th>
+                <th>Status</th>
+                <th>Gesendet</th>
+                <th>Fehler</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for n in notifications %}
+            <tr>
+                <td>{{ n.channel }}</td>
+                <td>{{ n.subject or '-' }}</td>
+                <td><span class="badge badge-{{ n.status }}">{{ n.status }}</span></td>
+                <td>{{ n.sent_at }}</td>
+                <td>{{ n.error_message or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">Keine Benachrichtigungen fuer diesen Scan.</p>
+    {% endif %}
+</div>
+{% endblock %}

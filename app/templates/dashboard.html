@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Ice-Leak-Monitor{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+
+<!-- Stat Cards -->
+<div class="stat-cards">
+    <div class="card stat-card">
+        <div class="stat-value">{{ active_keywords }}</div>
+        <div class="stat-label">Keywords aktiv</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-value">{{ total_repos }}</div>
+        <div class="stat-label">Repos gefunden</div>
+    </div>
+    <div class="card stat-card {% if open_findings > 0 %}stat-alert{% endif %}">
+        <div class="stat-value">{{ open_findings }}</div>
+        <div class="stat-label">Offene Findings</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-value">
+            {% if last_scan %}
+                {{ last_scan.started_at[:10] }}
+            {% else %}
+                --
+            {% endif %}
+        </div>
+        <div class="stat-label">Letzter Scan</div>
+    </div>
+</div>
+
+<!-- Actions -->
+<div class="actions-bar">
+    <button id="btn-trigger-scan" class="btn btn-primary" onclick="triggerScan()">
+        Scan jetzt starten
+    </button>
+    <button id="btn-cancel-scan" class="btn btn-danger hidden" onclick="cancelScan()">
+        Scan abbrechen
+    </button>
+</div>
+
+<!-- Live Scan Monitor -->
+<div id="scan-monitor" class="card scan-monitor hidden">
+    <div class="scan-monitor-header">
+        <h2>Live Scan Monitor</h2>
+        <span id="monitor-cancel-hint" class="cancel-hint hidden">Abbruch angefordert...</span>
+    </div>
+    <div class="stage-badges">
+        <span class="stage-badge" data-stage="0">0 Vorbereitung</span>
+        <span class="stage-badge" data-stage="1">1 OSINT</span>
+        <span class="stage-badge" data-stage="2">2 GitHub-Suche</span>
+        <span class="stage-badge" data-stage="3">3 AI-Relevanz</span>
+        <span class="stage-badge" data-stage="4">4 Deep Scan</span>
+        <span class="stage-badge" data-stage="5">5 AI-Assessment</span>
+        <span class="stage-badge" data-stage="6">6 Abschluss</span>
+    </div>
+    <div class="scan-monitor-status">
+        <div class="scan-monitor-message">
+            <span id="monitor-stage-name"></span>
+            <span id="monitor-message"></span>
+        </div>
+        <div class="scan-monitor-counters">
+            <span id="monitor-counter" class="monitor-counter"></span>
+            <span class="monitor-sep">|</span>
+            <span id="monitor-repos" class="monitor-stat">Repos: <strong>0</strong></span>
+            <span class="monitor-sep">|</span>
+            <span id="monitor-findings" class="monitor-stat">Findings: <strong>0</strong></span>
+        </div>
+    </div>
+    <div class="progress-bar">
+        <div id="monitor-progress-fill" class="progress-fill" style="width: 0%"></div>
+    </div>
+    <div id="monitor-current-item" class="monitor-current-item"></div>
+    <div id="monitor-log" class="live-log"></div>
+</div>
+
+<!-- Activity Feed + Recent Scans -->
+<div class="grid-2">
+    <!-- Recent Scans -->
+    <div class="card">
+        <h2>Letzte Scans</h2>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Gestartet</th>
+                    <th>Status</th>
+                    <th>Typ</th>
+                    <th>Repos</th>
+                    <th>Neue Findings</th>
+                    <th>Dauer</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for scan in recent_scans %}
+                <tr>
+                    <td><a href="/scans/{{ scan.id }}">{{ scan.id }}</a></td>
+                    <td>{{ scan.started_at }}</td>
+                    <td><span class="badge badge-{{ scan.status }}">{{ scan.status }}</span></td>
+                    <td>{{ scan.trigger_type }}</td>
+                    <td>{{ scan.repos_scanned or 0 }}</td>
+                    <td>{{ scan.new_findings or 0 }}</td>
+                    <td>{{ "%.0f"|format(scan.duration_seconds or 0) }}s</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Activity Feed -->
+    <div class="card">
+        <h2>Letzte Aktivitaeten</h2>
+        <div id="activity-feed" class="activity-feed">
+            <p class="empty-state">Keine Aktivitaeten</p>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Findings -->
+<div class="card">
+    <h2>Neueste Findings</h2>
+    {% if recent_findings %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Repo</th>
+                <th>Scanner</th>
+                <th>Detektor</th>
+                <th>Severity</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in recent_findings %}
+            <tr>
+                <td>
+                    {% if f.repo %}
+                    <a href="/repos/{{ f.repo_id }}">{{ f.repo.full_name }}</a>
+                    {% else %}
+                    Repo #{{ f.repo_id }}
+                    {% endif %}
+                </td>
+                <td>{{ f.scanner }}</td>
+                <td><code>{{ f.detector_name }}</code></td>
+                <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">Keine offenen Findings</p>
+    {% endif %}
+</div>
+
+<!-- Weekly Chart -->
+<div class="card">
+    <h2>Findings pro Woche</h2>
+    <canvas id="weekly-chart" height="200"></canvas>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const weeklyLabels = {{ weekly_labels | tojson }};
+const weeklyCounts = {{ weekly_counts | tojson }};
+drawWeeklyChart(weeklyLabels, weeklyCounts);
+</script>
+{% endblock %}

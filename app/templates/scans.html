@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Scans - Ice-Leak-Monitor{% endblock %}
+
+{% block content %}
+<h1>Scan-History</h1>
+
+<div class="actions-bar">
+    <button id="btn-trigger-scan" class="btn btn-primary" onclick="triggerScan()">
+        Scan jetzt starten
+    </button>
+</div>
+
+<div class="card">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Gestartet</th>
+                <th>Beendet</th>
+                <th>Status</th>
+                <th>Typ</th>
+                <th>Keywords</th>
+                <th>Repos gefunden</th>
+                <th>Repos gescannt</th>
+                <th>Neue Findings</th>
+                <th>Gesamt Findings</th>
+                <th>Dauer</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for scan in scans %}
+            <tr>
+                <td><a href="/scans/{{ scan.id }}">{{ scan.id }}</a></td>
+                <td>{{ scan.started_at }}</td>
+                <td>{{ scan.finished_at or '-' }}</td>
+                <td><span class="badge badge-{{ scan.status }}">{{ scan.status }}</span></td>
+                <td>{{ scan.trigger_type }}</td>
+                <td>{{ scan.keywords_used or 0 }}</td>
+                <td>{{ scan.repos_found or 0 }}</td>
+                <td>{{ scan.repos_scanned or 0 }}</td>
+                <td>{{ scan.new_findings or 0 }}</td>
+                <td>{{ scan.total_findings or 0 }}</td>
+                <td>{{ "%.0f"|format(scan.duration_seconds or 0) }}s</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if not scans %}
+    <p class="empty-state">Noch keine Scans durchgefuehrt.</p>
+    {% endif %}
+</div>
+{% endblock %}

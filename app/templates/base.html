@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Ice-Leak-Monitor{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <h2>Ice-Leak-Monitor</h2>
+            <span class="subtitle">MHB Data Leak Detection</span>
+        </div>
+        <ul class="nav-links">
+            <li><a href="/" class="{% if request.url.path == '/' %}active{% endif %}">Dashboard</a></li>
+            <li><a href="/keywords" class="{% if '/keywords' in request.url.path %}active{% endif %}">Keywords</a></li>
+            <li><a href="/repos" class="{% if '/repos' in request.url.path %}active{% endif %}">Repositories</a></li>
+            <li><a href="/findings" class="{% if '/findings' in request.url.path %}active{% endif %}">Findings</a></li>
+            <li><a href="/scans" class="{% if '/scans' in request.url.path %}active{% endif %}">Scans</a></li>
+            <li><a href="/settings" class="{% if '/settings' in request.url.path %}active{% endif %}">Einstellungen</a></li>
+        </ul>
+        <div class="sidebar-footer">
+            <div id="scan-indicator" class="scan-indicator hidden">
+                <span class="spinner"></span>
+                <div class="indicator-details">
+                    <span id="indicator-text">Scan laeuft...</span>
+                    <span id="indicator-stage" class="indicator-stage"></span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="/static/js/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen - Ice-Leak-Monitor{% endblock %}
+
+{% block content %}
+<h1>Einstellungen</h1>
+
+<!-- OSINT Module -->
+<div class="card settings-card">
+    <h2>OSINT Module</h2>
+    <p class="settings-desc">Aktiviere/deaktiviere OSINT-Module fuer die automatische Aufklaerung. Aktivierte Module werden in Stage 1 jedes Scans ausgefuehrt.</p>
+
+    <div class="module-list">
+        {% for mod in modules %}
+        <div class="module-row" id="module-{{ mod.module_key }}">
+            <div class="module-toggle">
+                <label class="toggle-switch">
+                    <input type="checkbox"
+                           {% if mod.is_enabled %}checked{% endif %}
+                           onchange="toggleModule('{{ mod.module_key }}')">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="module-info">
+                <span class="module-name">{{ mod.display_name }}</span>
+                <span class="module-desc">{{ mod.description }}</span>
+            </div>
+            {% if mod.needs_api_key %}
+            <div class="module-config">
+                <div class="api-key-field">
+                    <input type="password"
+                           class="input input-sm"
+                           id="apikey-{{ mod.module_key }}"
+                           placeholder="API Key"
+                           value="{{ mod.api_key_masked }}"
+                           onfocus="this.value=''; this.type='text'"
+                           onblur="if(!this.value) { this.value='{{ mod.api_key_masked }}'; this.type='password'; }">
+                    <button class="btn btn-sm btn-primary"
+                            onclick="saveModuleConfig('{{ mod.module_key }}')">
+                        Speichern
+                    </button>
+                </div>
+                {% if mod.has_api_key %}
+                <span class="api-key-status api-key-ok">Key konfiguriert</span>
+                {% else %}
+                <span class="api-key-status api-key-missing">Kein Key</span>
+                {% endif %}
+            </div>
+            {% endif %}
+            <div class="module-status">
+                {% if mod.is_enabled %}
+                <span class="badge badge-completed">Aktiv</span>
+                {% else %}
+                <span class="badge badge-skipped">Inaktiv</span>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- OSINT Results -->
+<div class="card">
+    <h2>OSINT-Ergebnisse</h2>
+    {% if recent_results %}
+    <div class="osint-results-wrap">
+        <table class="table osint-results-table">
+            <thead>
+                <tr>
+                    <th>Modul</th>
+                    <th>Keyword</th>
+                    <th>Typ</th>
+                    <th>Ergebnis</th>
+                    <th>Datum</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in recent_results %}
+                <tr>
+                    <td><span class="badge badge-info">{{ r.module_key }}</span></td>
+                    <td><code>{{ r.keyword_used }}</code></td>
+                    <td><span class="badge badge-category">{{ r.result_type or '-' }}</span></td>
+                    <td class="result-value">{{ r.result_value[:80] }}{% if r.result_value|length > 80 %}...{% endif %}</td>
+                    <td class="text-muted">{{ r.created_at[:16] if r.created_at else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty-state">Noch keine OSINT-Ergebnisse. Starte einen Scan mit aktivierten OSINT-Modulen.</p>
+    {% endif %}
+</div>
+{% endblock %}

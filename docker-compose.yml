@@ -1,0 +1,16 @@
+services:
+  iceleakmonitor:
+    build: .
+    container_name: iceleakmonitor
+    restart: unless-stopped
+    ports:
+      - "8084:8080"
+    env_file:
+      - .env
+    volumes:
+      - iceleakmonitor-data:/data
+    environment:
+      - TZ=Europe/Berlin
+
+volumes:
+  iceleakmonitor-data:
