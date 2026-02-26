@@ -8,10 +8,8 @@ _STAGE_NAMES = {
     0: "Vorbereitung",
     1: "OSINT",
     2: "GitHub-Suche",
-    3: "AI-Relevanzpruefung",
-    4: "Deep Scan",
-    5: "AI-Assessment",
-    6: "Abschluss",
+    3: "Repo-Analyse",
+    4: "Abschluss",
 }
 
 MAX_LOG_ENTRIES = 200

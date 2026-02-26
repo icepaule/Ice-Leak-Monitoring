@@ -280,6 +280,7 @@ def run_scan_pipeline(db: Session, trigger_type: str = "manual"):
                 repo_obj.default_branch = details.get("default_branch", "main")
                 repo_obj.language = details.get("language", "")
                 repo_obj.stargazers = details.get("stargazers", 0)
+                repo_obj.github_pushed_at = details.get("pushed_at", "")
                 if not repo_obj.description:
                     repo_obj.description = details.get("description", "")
         db.commit()
@@ -290,74 +291,93 @@ def run_scan_pipeline(db: Session, trigger_type: str = "manual"):
         scan_progress.check_cancelled()
 
         # =====================================================================
-        # Stage 3: Ollama AI relevance check (was Stage 2)
+        # Stage 3: Repo-Analyse (per-repo: AI-Check → Skip-Check → Deep Scan → Finding-Assessment)
         # =====================================================================
-        scan_progress.update(3, message="AI-Relevanzpruefung starten...", total=len(repo_objects))
-        scan_progress.add_log("Stage 3: AI-Relevanzpruefung")
-        repos_to_scan: list[tuple[str, DiscoveredRepo]] = []
-        ai_idx = 0
-        for full_name, repo_obj in repo_objects.items():
-            ai_idx += 1
-            scan_progress.check_cancelled()
-            scan_progress.update(3, message=f"AI-Check: {full_name}", current_item=full_name, count=ai_idx, total=len(repo_objects))
-            scan_progress.add_activity("ollama", f"Ollama Relevanz-Check: {full_name}")
+        total = len(repo_objects)
+        scan_progress.update(3, message=f"Repo-Analyse starten ({total} Repos)...", total=total)
+        scan_progress.add_log(f"Stage 3: Repo-Analyse ({total} Repos)")
+        total_findings_count = 0
 
+        for ri, (full_name, repo_obj) in enumerate(repo_objects.items(), 1):
+            scan_progress.check_cancelled()
+            scan_progress.update(3, message=f"Repo {ri}/{total}: {full_name}", current_item=full_name, count=ri, total=total)
+
+            # === Skip-Check Decision Tree ===
+
+            # 1. Dismissed → skip
             if repo_obj.is_dismissed:
                 scan_progress.add_log(f"Uebersprungen (dismissed): {full_name}")
                 logger.info("Skipping dismissed repo: %s", full_name)
                 continue
 
-            # Skip repos that are too large
+            # 2. Too large → skip
             max_size = settings.max_repo_size_mb * 1024
             if repo_obj.repo_size_kb and repo_obj.repo_size_kb > max_size:
                 scan_progress.add_log(f"Uebersprungen (zu gross): {full_name}")
                 logger.info("Skipping oversized repo %s (%d KB)", full_name, repo_obj.repo_size_kb)
                 repo_obj.scan_status = "skipped"
+                db.commit()
                 continue
 
-            # AI relevance check
-            readme = get_repo_readme(full_name)
-            score, summary = assess_repo_relevance(
-                full_name,
-                repo_obj.description or "",
-                repo_obj.language or "",
-                readme,
-            )
-            repo_obj.ai_relevance = score
-            repo_obj.ai_summary = summary
+            # 3. ai_scan_enabled == 0 → User blocked
+            if repo_obj.ai_scan_enabled == 0:
+                scan_progress.add_log(f"Uebersprungen (User-gesperrt): {full_name}")
+                logger.info("Skipping user-blocked repo: %s", full_name)
+                if repo_obj.scan_status == "pending":
+                    repo_obj.scan_status = "skipped"
+                db.commit()
+                continue
 
-            if score >= 0.3:
-                repos_to_scan.append((full_name, repo_obj))
-                scan_progress.add_log(f"Relevant ({score:.2f}): {full_name}")
-                logger.info("Repo %s: AI score %.2f - will scan", full_name, score)
+            # 4. ai_scan_enabled == 1 → User forced (skip AI check)
+            force_scan = repo_obj.ai_scan_enabled == 1
+            if force_scan:
+                scan_progress.add_log(f"Erzwungen (User-Override): {full_name}")
+                logger.info("User-forced scan for: %s", full_name)
             else:
-                repo_obj.scan_status = "low_relevance"
-                scan_progress.add_log(f"Irrelevant ({score:.2f}): {full_name}")
-                logger.info("Repo %s: AI score %.2f - skipping", full_name, score)
+                # 5. ai_scan_enabled is None → Ollama AI-Check
+                scan_progress.add_activity("ollama", f"Ollama Relevanz-Check: {full_name}")
+                readme = get_repo_readme(full_name)
+                score, summary = assess_repo_relevance(
+                    full_name,
+                    repo_obj.description or "",
+                    repo_obj.language or "",
+                    readme,
+                )
+                repo_obj.ai_relevance = score
+                repo_obj.ai_summary = summary
 
-        db.commit()
-        scan_progress.add_log(f"AI-Pruefung abgeschlossen: {len(repos_to_scan)} Repos zum Scannen")
-        logger.info("Stage 3 complete: %d repos queued for deep scan", len(repos_to_scan))
+                if score < 0.3:
+                    repo_obj.scan_status = "low_relevance"
+                    scan_progress.add_log(f"Irrelevant ({score:.2f}): {full_name}")
+                    logger.info("Repo %s: AI score %.2f - skipping", full_name, score)
+                    db.commit()
+                    continue
+                else:
+                    scan_progress.add_log(f"Relevant ({score:.2f}): {full_name}")
+                    logger.info("Repo %s: AI score %.2f - will scan", full_name, score)
 
-        # --- Cancel check ---
-        scan_progress.check_cancelled()
+            # 6. Unchanged check (pushed_at <= last_scanned_at) → skip
+            if not force_scan and repo_obj.github_pushed_at and repo_obj.last_scanned_at:
+                try:
+                    pushed = repo_obj.github_pushed_at.replace("Z", "+00:00")
+                    scanned = repo_obj.last_scanned_at
+                    if pushed <= scanned:
+                        repo_obj.scan_status = "unchanged"
+                        scan_progress.add_log(f"Uebersprungen (unveraendert): {full_name}")
+                        logger.info("Skipping unchanged repo: %s (pushed=%s, scanned=%s)", full_name, pushed, scanned)
+                        db.commit()
+                        continue
+                except (ValueError, TypeError):
+                    pass  # If comparison fails, scan anyway
 
-        # =====================================================================
-        # Stage 4: Deep scanning (TruffleHog + Gitleaks + Custom) (was Stage 3)
-        # =====================================================================
-        scan_progress.update(4, message="Deep Scan starten...", total=len(repos_to_scan))
-        scan_progress.add_log(f"Stage 4: Deep Scan ({len(repos_to_scan)} Repos)")
-        total_findings_count = 0
-
-        for ri, (full_name, repo_obj) in enumerate(repos_to_scan, 1):
-            scan_progress.check_cancelled()
+            # === Deep Scan: TruffleHog + Clone + Gitleaks + Custom ===
             repo_start = time.time()
             repo_url = f"https://github.com/{full_name}.git"
             all_findings: list[dict] = []
 
             with tempfile.TemporaryDirectory(prefix="ilm_") as clone_dir:
                 # TruffleHog (scans remote repo directly)
-                scan_progress.update(4, message=f"TruffleHog: {full_name}", current_item=full_name, count=ri, total=len(repos_to_scan))
+                scan_progress.update(3, message=f"TruffleHog: {full_name}", current_item=full_name, count=ri, total=total)
                 scan_progress.add_log(f"TruffleHog: {full_name}")
                 scan_progress.add_activity("trufflehog", f"TruffleHog scannt: {full_name}")
                 th_findings = trufflehog_scan(repo_url, full_name)
@@ -366,7 +386,7 @@ def run_scan_pipeline(db: Session, trigger_type: str = "manual"):
                 scan_progress.check_cancelled()
 
                 # Clone for Gitleaks + Custom scan
-                scan_progress.update(4, message=f"Gitleaks: {full_name}", current_item=full_name, count=ri, total=len(repos_to_scan))
+                scan_progress.update(3, message=f"Gitleaks: {full_name}", current_item=full_name, count=ri, total=total)
                 scan_progress.add_log(f"Gitleaks: {full_name}")
                 scan_progress.add_activity("gitleaks", f"Gitleaks scannt: {full_name}")
                 cloned = _clone_repo(repo_url, clone_dir)
@@ -383,7 +403,7 @@ def run_scan_pipeline(db: Session, trigger_type: str = "manual"):
                     extra_patterns = [
                         (kw.term, kw.term, "medium") for kw in custom_keywords
                     ]
-                    scan_progress.update(4, message=f"Custom Patterns: {full_name}", current_item=full_name, count=ri, total=len(repos_to_scan))
+                    scan_progress.update(3, message=f"Custom Patterns: {full_name}", current_item=full_name, count=ri, total=total)
                     scan_progress.add_log(f"Custom Scan: {full_name}")
                     scan_progress.add_activity("custom", f"Custom-Scan: {full_name}")
                     cx_findings = custom_scan(clone_dir, full_name, extra_patterns if extra_patterns else None)
@@ -398,6 +418,24 @@ def run_scan_pipeline(db: Session, trigger_type: str = "manual"):
                 total_findings_count += 1
 
             new_findings_count += repo_new
+
+            # === Finding Assessment: Ollama for each new finding ===
+            new_repo_findings = db.query(Finding).filter_by(
+                scan_id=scan.id, repo_id=repo_obj.id, ai_assessment=None
+            ).all()
+            for finding in new_repo_findings:
+                scan_progress.add_activity("ollama", f"AI-Assessment: {full_name} / {finding.detector_name}")
+                assessment = assess_finding(
+                    scanner=finding.scanner,
+                    detector_name=finding.detector_name,
+                    file_path=finding.file_path or "",
+                    repo_name=full_name,
+                    repo_description=repo_obj.description or "",
+                    verified=bool(finding.verified),
+                )
+                if assessment:
+                    finding.ai_assessment = assessment
+                    scan_progress.add_log(f"AI-Bewertung: {full_name} / {finding.detector_name}")
 
             # Update repo status
             scan_dur = time.time() - repo_start
@@ -415,44 +453,12 @@ def run_scan_pipeline(db: Session, trigger_type: str = "manual"):
             if repo_new > 0:
                 scan_progress.add_activity("finding", f"{repo_new} Findings in {full_name}")
 
+            # Commit after each repo → findings visible immediately
             db.commit()
             logger.info(
                 "Scanned %s: %d new findings (%d total from all engines) in %.1fs",
                 full_name, repo_new, len(all_findings), scan_dur,
             )
-
-        # --- Cancel check ---
-        scan_progress.check_cancelled()
-
-        # =====================================================================
-        # Stage 5: Ollama finding assessment for new findings (was Stage 4)
-        # =====================================================================
-        new_findings = db.query(Finding).filter_by(
-            scan_id=scan.id, ai_assessment=None
-        ).all()
-
-        scan_progress.update(5, message=f"{len(new_findings)} Findings bewerten...", total=len(new_findings))
-        scan_progress.add_log(f"Stage 5: AI-Assessment ({len(new_findings)} Findings)")
-
-        for fi, finding in enumerate(new_findings, 1):
-            scan_progress.check_cancelled()
-            repo_obj = db.query(DiscoveredRepo).get(finding.repo_id)
-            if not repo_obj:
-                continue
-            scan_progress.update(5, message=f"Finding #{fi}: {finding.detector_name}", current_item=f"{repo_obj.full_name}: {finding.detector_name}", count=fi, total=len(new_findings))
-            scan_progress.add_activity("ollama", f"Ollama AI-Assessment: {repo_obj.full_name} / {finding.detector_name}")
-            assessment = assess_finding(
-                scanner=finding.scanner,
-                detector_name=finding.detector_name,
-                file_path=finding.file_path or "",
-                repo_name=repo_obj.full_name,
-                repo_description=repo_obj.description or "",
-                verified=bool(finding.verified),
-            )
-            if assessment:
-                finding.ai_assessment = assessment
-                scan_progress.add_log(f"AI-Bewertung: {repo_obj.full_name} / {finding.detector_name}")
-        db.commit()
 
         # Finalize scan
         duration = time.time() - start_time
@@ -470,10 +476,10 @@ def run_scan_pipeline(db: Session, trigger_type: str = "manual"):
         )
 
         # =====================================================================
-        # Stage 6: Notifications (was Stage 5)
+        # Stage 4: Abschluss (Notifications)
         # =====================================================================
-        scan_progress.update(6, message="Notifications senden...")
-        scan_progress.add_log("Stage 6: Abschluss & Benachrichtigungen")
+        scan_progress.update(4, message="Notifications senden...")
+        scan_progress.add_log("Stage 4: Abschluss & Benachrichtigungen")
 
         # Trigger notifications if there are new findings
         if new_findings_count > 0:

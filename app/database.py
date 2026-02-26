@@ -33,5 +33,29 @@ def get_db():
         db.close()
 
 
+def _migrate_db():
+    """Add columns that may be missing from older database schemas."""
+    import sqlite3
+    conn = sqlite3.connect(settings.db_path)
+    cursor = conn.cursor()
+
+    # Get existing columns for discovered_repos
+    cursor.execute("PRAGMA table_info(discovered_repos)")
+    existing = {row[1] for row in cursor.fetchall()}
+
+    migrations = [
+        ("github_pushed_at", "ALTER TABLE discovered_repos ADD COLUMN github_pushed_at TEXT"),
+        ("ai_scan_enabled", "ALTER TABLE discovered_repos ADD COLUMN ai_scan_enabled INTEGER"),
+    ]
+
+    for col_name, sql in migrations:
+        if col_name not in existing:
+            cursor.execute(sql)
+
+    conn.commit()
+    conn.close()
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _migrate_db()

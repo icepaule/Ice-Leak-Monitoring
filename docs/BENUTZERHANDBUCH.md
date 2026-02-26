@@ -34,11 +34,11 @@ Waehrend eines Scans zeigt der Monitor den Fortschritt in Echtzeit:
 |-------|-------------|
 | **0 Vorbereitung** | Keywords aus der Datenbank laden |
 | **1 OSINT** | Aktivierte OSINT-Module ausfuehren (Subfinder, theHarvester, etc.) |
-| **2 GitHub-Suche** | GitHub Code Search fuer alle Keywords |
-| **3 AI-Relevanz** | KI-Bewertung der gefundenen Repos (Ollama) |
-| **4 Deep Scan** | TruffleHog + Gitleaks + Custom Pattern Scanning |
-| **5 AI-Assessment** | KI-Bewertung der gefundenen Secrets |
-| **6 Abschluss** | Benachrichtigungen senden, Scan abschliessen |
+| **2 GitHub-Suche** | GitHub Code Search fuer alle Keywords, Repo-Details abrufen |
+| **3 Repo-Analyse** | Per Repo: AI-Check, Skip-Pruefung, Deep Scan, AI-Assessment, DB-Commit |
+| **4 Abschluss** | Benachrichtigungen senden, Scan abschliessen |
+
+In Stage 3 wird jedes Repository einzeln komplett abgearbeitet (AI-Relevanzpruefung, Deep Scan, Finding-Bewertung), bevor das naechste drankommt. Findings erscheinen sofort im Dashboard — Sie muessen nicht warten bis alle Repos gescannt sind.
 
 Das **Log-Fenster** zeigt detaillierte Fortschrittsmeldungen. Es ist scrollbar - Sie koennen nach oben scrollen um fruehere Eintraege zu sehen.
 
@@ -84,7 +84,7 @@ Zeigt alle von GitHub entdeckten Repositories.
 
 ### Filter & Sortierung
 
-- **Status-Filter**: Alle, Pending, Clean, Findings, Low Relevance
+- **Status-Filter**: Alle, Pending, Clean, Findings, Low Relevance, Unchanged, Skipped
 - **Sortierung**: Zuletzt gesehen, Name, Groesse, AI Score
 
 ### Spalten
@@ -96,9 +96,26 @@ Zeigt alle von GitHub entdeckten Repositories.
 | **Groesse** | Repository-Groesse in MB |
 | **Sprache** | Hauptprogrammiersprache |
 | **Keyword-Bezug** | Welche Keywords gematched haben, mit Dateiliste |
-| **Status** | pending/clean/findings/low_relevance/skipped |
+| **Status** | pending/clean/findings/low_relevance/skipped/unchanged |
 | **AI Score** | KI-Relevanzbewertung (0-100%) |
+| **Scan** | AI-Override-Steuerung (Auto/Erzwungen/Gesperrt) |
 | **Findings** | Anzahl offener Findings |
+
+### AI-Override pro Repo
+
+In der Spalte "Scan" kann der Scan-Modus pro Repository gesteuert werden:
+
+| Modus | Beschreibung |
+|-------|-------------|
+| **Auto** | Standard — die KI entscheidet ob das Repo gescannt wird (Score >= 0.3) |
+| **Auto (skip)** | KI hat das Repo als irrelevant bewertet (Score < 0.3) |
+| **Erzwungen** | Scan wird erzwungen, unabhaengig vom AI-Score. Nuetzlich fuer Repos die die KI faelschlicherweise als irrelevant eingestuft hat |
+| **Gesperrt** | Scan wird unterdrueckt. Nuetzlich fuer bekannte False Positives oder interne Repos |
+
+Buttons:
+- **Erzwingen** — Setzt den Scan-Modus auf "Erzwungen"
+- **Sperren** — Setzt den Scan-Modus auf "Gesperrt"
+- **Auto** — Setzt den Scan-Modus zurueck auf automatische KI-Entscheidung
 
 ### Keyword-Matches verwalten
 

@@ -247,6 +247,7 @@ h2 {
 .badge-findings { background: var(--accent-red); color: #fff; }
 .badge-low_relevance { background: var(--text-muted); color: #fff; }
 .badge-skipped { background: var(--text-muted); color: #fff; }
+.badge-unchanged { background: var(--bg-hover); color: var(--accent-blue); border: 1px solid var(--accent-blue); }
 .badge-keyword { background: var(--bg-input); color: var(--accent-blue); border: 1px solid var(--border); }
 .badge-category { background: var(--bg-input); color: var(--accent-purple); border: 1px solid var(--border); }
 
@@ -581,6 +582,40 @@ h2 {
 
 .live-log::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
+}
+
+/* === AI Override Buttons === */
+.ai-override-cell {
+    white-space: nowrap;
+    min-width: 120px;
+}
+
+.ai-override-btns {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.ai-force {
+    background: var(--accent-green) !important;
+    color: #fff !important;
+    border-color: var(--accent-green) !important;
+}
+
+.ai-block {
+    background: var(--accent-red) !important;
+    color: #fff !important;
+    border-color: var(--accent-red) !important;
+}
+
+.ai-auto {
+    background: var(--bg-input) !important;
+    color: var(--text-muted) !important;
+    border-color: var(--border) !important;
+}
+
+.ai-auto:hover {
+    color: var(--text-heading) !important;
 }
 
 /* === Activity Feed === */

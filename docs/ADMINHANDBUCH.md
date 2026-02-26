@@ -10,7 +10,7 @@ graph TB
     FastAPI --> Static[Static: CSS, JS]
     FastAPI --> Scheduler[APScheduler - 03:00 UTC]
 
-    Routes --> Orchestrator[Scanner Orchestrator - 7 Stages]
+    Routes --> Orchestrator[Scanner Orchestrator - 5 Stages]
     Scheduler --> Orchestrator
 
     Orchestrator --> OSINT[OSINT Module]
@@ -74,13 +74,13 @@ CREATE TABLE osint_results (
 
 ---
 
-## Scan-Pipeline (7 Stages)
+## Scan-Pipeline (5 Stages)
 
 ### Stage 0: Vorbereitung
 - Aktive Keywords aus der DB laden
 - Scan-Record erstellen (Status: running)
 
-### Stage 1: OSINT-Aufklaerung (NEU)
+### Stage 1: OSINT-Aufklaerung
 - Alle aktivierten Module aus `module_settings` laden
 - Fuer jedes Modul: Keywords filtern (Domain, E-Mail, Company)
 - Module sequentiell ausfuehren
@@ -91,30 +91,46 @@ CREATE TABLE osint_results (
 ### Stage 2: GitHub Code Search
 - GitHub Search API fuer jedes Keyword
 - Repos upserten, RepoKeywordMatch-Records erstellen
-- Repo-Details abrufen (Groesse, Sprache, Stars)
+- Repo-Details abrufen (Groesse, Sprache, Stars, pushed_at)
+- `github_pushed_at` im Repo-Record speichern
 
-### Stage 3: AI-Relevanzpruefung
-- README laden, Ollama-Bewertung (Score 0.0 - 1.0)
-- Repos mit Score >= 0.3 werden gescannt
-- Dismissed Repos werden uebersprungen
-- Repos ueber max_repo_size_mb werden uebersprungen
+### Stage 3: Repo-Analyse (Per-Repo-Verarbeitung)
 
-### Stage 4: Deep Scan
+Jedes Repo wird einzeln komplett abgearbeitet. Findings erscheinen sofort im Dashboard nach jedem `db.commit()`.
+
+**Skip-Logik (Entscheidungsbaum pro Repo):**
+
+1. **Dismissed** → Uebersprungen
+2. **Zu gross** (> max_repo_size_mb) → Uebersprungen (scan_status="skipped")
+3. **User-gesperrt** (ai_scan_enabled=0) → Uebersprungen
+4. **User-erzwungen** (ai_scan_enabled=1) → Scan ohne AI-Check
+5. **AI-Check** (ai_scan_enabled=NULL) → Ollama Relevanz-Score; < 0.3 → Uebersprungen (low_relevance)
+6. **Unveraendert** (pushed_at <= last_scanned_at) → Uebersprungen (scan_status="unchanged")
+7. Alle Checks bestanden → **Deep Scan** + **AI-Assessment**
+
+**Deep Scan:**
 - TruffleHog (Remote-Scan, kein Clone noetig)
 - Git Clone (shallow, depth=1)
 - Gitleaks (auf geklontem Repo)
 - Custom Patterns (auf geklontem Repo)
 - Finding-Deduplizierung per SHA256-Hash
-- Temporaere Verzeichnisse aufraumen
 
-### Stage 5: AI-Assessment
+**AI-Assessment (pro Repo):**
 - Ollama-Bewertung jedes neuen Findings
 - MITRE ATT&CK, DORA, BaFin-Kontext
+- `db.commit()` nach jedem Repo → sofort im Dashboard sichtbar
 
-### Stage 6: Abschluss
+### Stage 4: Abschluss
 - Pushover-Benachrichtigung (bei neuen Findings)
 - E-Mail-Benachrichtigung
 - Scan-Record finalisieren
+
+### Neue Felder auf discovered_repos
+
+| Feld | Typ | Beschreibung |
+|------|-----|-------------|
+| `github_pushed_at` | TEXT | GitHub's pushed_at Timestamp (ISO) — wann das Repo zuletzt geaendert wurde |
+| `ai_scan_enabled` | INTEGER | NULL=KI entscheidet, 0=User sperrt Scan, 1=User erzwingt Scan |
 
 ---
 
@@ -218,6 +234,13 @@ CREATE TABLE osint_results (
 | GET | `/settings` | Einstellungsseite |
 | POST | `/settings/modules/{key}/toggle` | Modul an/aus |
 | POST | `/settings/modules/{key}/config` | API-Key speichern |
+
+### Repositories
+
+| Methode | Pfad | Beschreibung |
+|---------|------|-------------|
+| POST | `/repos/{id}/ai-override` | AI-Scan-Override (Body: `{"ai_scan_enabled": 0\|1\|null}`) |
+| POST | `/repos/{id}/dismiss` | Repo als False Positive markieren/entmarkieren |
 
 ### Keywords
 

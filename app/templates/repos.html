@@ -13,6 +13,8 @@
             <option value="clean" {% if current_status == 'clean' %}selected{% endif %}>Clean</option>
             <option value="findings" {% if current_status == 'findings' %}selected{% endif %}>Findings</option>
             <option value="low_relevance" {% if current_status == 'low_relevance' %}selected{% endif %}>Low Relevance</option>
+            <option value="unchanged" {% if current_status == 'unchanged' %}selected{% endif %}>Unchanged</option>
+            <option value="skipped" {% if current_status == 'skipped' %}selected{% endif %}>Skipped</option>
         </select>
         <select name="sort" class="input select" onchange="this.form.submit()">
             <option value="last_seen" {% if current_sort == 'last_seen' %}selected{% endif %}>Zuletzt gesehen</option>
@@ -43,6 +45,7 @@
                 <th>Keyword-Bezug</th>
                 <th>Status</th>
                 <th>AI Score</th>
+                <th>Scan</th>
                 <th>Findings</th>
                 <th>Letzter Scan</th>
             </tr>
@@ -112,6 +115,25 @@
                         </span>
                     {% else %}
                         -
+                    {% endif %}
+                </td>
+                <td class="ai-override-cell">
+                    {% if repo.ai_scan_enabled == 1 %}
+                        <span class="badge ai-force">Erzwungen</span>
+                        <button class="btn btn-sm ai-auto" onclick="setAiOverride({{ repo.id }}, null)" title="Zuruecksetzen auf Auto">Auto</button>
+                    {% elif repo.ai_scan_enabled == 0 %}
+                        <span class="badge ai-block">Gesperrt</span>
+                        <button class="btn btn-sm ai-auto" onclick="setAiOverride({{ repo.id }}, null)" title="Zuruecksetzen auf Auto">Auto</button>
+                    {% else %}
+                        {% if repo.ai_relevance is not none and repo.ai_relevance < 0.3 %}
+                            <span class="text-muted" style="font-size:12px">Auto (skip)</span>
+                        {% else %}
+                            <span class="text-muted" style="font-size:12px">Auto</span>
+                        {% endif %}
+                        <div class="ai-override-btns">
+                            <button class="btn btn-sm ai-force" onclick="setAiOverride({{ repo.id }}, 1)" title="Scan erzwingen">Erzwingen</button>
+                            <button class="btn btn-sm ai-block" onclick="setAiOverride({{ repo.id }}, 0)" title="Scan sperren">Sperren</button>
+                        </div>
                     {% endif %}
                 </td>
                 <td>

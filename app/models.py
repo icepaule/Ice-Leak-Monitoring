@@ -64,6 +64,8 @@ class DiscoveredRepo(Base):
     matched_keywords = Column(Text)  # JSON array
     ai_relevance = Column(Float)
     ai_summary = Column(Text)
+    github_pushed_at = Column(Text)       # GitHub's pushed_at timestamp (ISO)
+    ai_scan_enabled = Column(Integer)     # NULL=AI decides, 0=user blocks, 1=user forces
     is_dismissed = Column(Integer, default=0)
 
     findings = relationship("Finding", back_populates="repo")

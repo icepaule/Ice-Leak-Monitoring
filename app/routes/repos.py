@@ -118,6 +118,29 @@ def toggle_match(match_id: int, db: Session = Depends(get_db)):
     return JSONResponse({"ok": True, "is_active": match.is_active})
 
 
+class AiOverrideRequest(BaseModel):
+    ai_scan_enabled: int | None  # 0=block, 1=force, null=auto
+
+
+@router.post("/repos/{repo_id}/ai-override")
+def ai_override(repo_id: int, payload: AiOverrideRequest, db: Session = Depends(get_db)):
+    repo = db.query(DiscoveredRepo).get(repo_id)
+    if not repo:
+        return JSONResponse({"ok": False, "message": "Repo nicht gefunden"}, status_code=404)
+
+    value = payload.ai_scan_enabled
+    repo.ai_scan_enabled = value
+
+    # Side-effects on scan_status
+    if value == 0 and repo.scan_status == "pending":
+        repo.scan_status = "skipped"
+    elif value == 1 and repo.scan_status in ("low_relevance", "skipped", "unchanged"):
+        repo.scan_status = "pending"
+
+    db.commit()
+    return JSONResponse({"ok": True, "ai_scan_enabled": repo.ai_scan_enabled})
+
+
 class BulkMatchAction(BaseModel):
     match_ids: list[int]
     action: str  # "activate" or "deactivate"

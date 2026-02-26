@@ -124,6 +124,7 @@ def get_repo_details(full_name: str) -> Optional[dict]:
             "language": data.get("language", ""),
             "is_fork": data.get("fork", False),
             "stargazers": data.get("stargazers_count", 0),
+            "pushed_at": data.get("pushed_at", ""),
         }
     except Exception:
         logger.exception("Failed to get repo details for %s", full_name)

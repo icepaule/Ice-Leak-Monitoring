@@ -221,7 +221,7 @@ function updateScanMonitor(data) {
     var fill = document.getElementById('monitor-progress-fill');
     if (fill) {
         fill.style.width = data.percent + '%';
-        var colors = ['#539bf5', '#b083f0', '#539bf5', '#d29922', '#f0883e', '#b083f0', '#57ab5a'];
+        var colors = ['#539bf5', '#b083f0', '#539bf5', '#f0883e', '#57ab5a'];
         fill.style.background = data.cancel_requested ? '#f47067' : (colors[data.stage] || '#539bf5');
     }
 
@@ -320,6 +320,21 @@ async function toggleFinding(id) {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ notes: notes }),
+        });
+        var data = await resp.json();
+        if (data.ok) location.reload();
+    } catch (e) {
+        alert('Fehler: ' + e.message);
+    }
+}
+
+// --- AI Override ---
+async function setAiOverride(repoId, value) {
+    try {
+        var resp = await fetch('/repos/' + repoId + '/ai-override', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ai_scan_enabled: value }),
         });
         var data = await resp.json();
         if (data.ok) location.reload();
