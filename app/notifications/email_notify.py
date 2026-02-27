@@ -50,6 +50,27 @@ def _get_email_recipients(db: Session) -> str:
     return settings.alert_email_to
 
 
+def _connect_smtp() -> smtplib.SMTP:
+    """Create an authenticated SMTP connection.
+
+    Handles SSL (port 465) and STARTTLS (port 587 or any port that
+    advertises STARTTLS in its EHLO response, including port 25).
+    """
+    if settings.smtp_port == 465:
+        server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=30)
+    else:
+        server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30)
+        server.ehlo()
+        if server.has_extn("STARTTLS"):
+            server.starttls()
+            server.ehlo()
+
+    if settings.smtp_username:
+        server.login(settings.smtp_username, settings.smtp_password)
+
+    return server
+
+
 def _build_activity_summary_html(db: Session, scan: Scan) -> str:
     """Build the scan activity summary section (repos breakdown, OSINT results)."""
 
@@ -441,7 +462,7 @@ def send_scan_email(db: Session, scan: Scan):
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = settings.alert_email_from or f"iceleakmonitor@{settings.smtp_host}"
+    msg["From"] = settings.alert_email_from or settings.smtp_username or f"iceleakmonitor@{settings.smtp_host}"
     msg["To"] = recipients
     msg["X-Priority"] = "1" if has_verified else "3"
 
@@ -463,19 +484,10 @@ def send_scan_email(db: Session, scan: Scan):
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     try:
-        if settings.smtp_port == 465:
-            server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=30)
-        else:
-            server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30)
-            if settings.smtp_port == 587:
-                server.starttls()
-
-        if settings.smtp_username:
-            server.login(settings.smtp_username, settings.smtp_password)
-
+        server = _connect_smtp()
         server.sendmail(
             msg["From"],
-            recipients.split(","),
+            [r.strip() for r in recipients.split(",")],
             msg.as_string(),
         )
         server.quit()
@@ -513,7 +525,7 @@ def send_findings_report_email(db: Session, finding_ids: list[int]) -> tuple[boo
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = settings.alert_email_from or f"iceleakmonitor@{settings.smtp_host}"
+    msg["From"] = settings.alert_email_from or settings.smtp_username or f"iceleakmonitor@{settings.smtp_host}"
     msg["To"] = recipients
     msg["X-Priority"] = "1" if has_verified else "3"
 
@@ -526,19 +538,10 @@ def send_findings_report_email(db: Session, finding_ids: list[int]) -> tuple[boo
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     try:
-        if settings.smtp_port == 465:
-            server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=30)
-        else:
-            server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30)
-            if settings.smtp_port == 587:
-                server.starttls()
-
-        if settings.smtp_username:
-            server.login(settings.smtp_username, settings.smtp_password)
-
+        server = _connect_smtp()
         server.sendmail(
             msg["From"],
-            recipients.split(","),
+            [r.strip() for r in recipients.split(",")],
             msg.as_string(),
         )
         server.quit()
