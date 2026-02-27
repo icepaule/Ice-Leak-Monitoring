@@ -460,10 +460,16 @@ def send_scan_email(db: Session, scan: Scan):
 
     html_body = _build_ciso_email_html(db, scan, new_findings)
 
+    sender = settings.alert_email_from or settings.smtp_username or f"iceleakmonitor@{settings.smtp_host}"
+    envelope_to = [r.strip() for r in recipients.split(",")]
+    if sender not in envelope_to:
+        envelope_to.append(sender)
+
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = settings.alert_email_from or settings.smtp_username or f"iceleakmonitor@{settings.smtp_host}"
+    msg["From"] = sender
     msg["To"] = recipients
+    msg["Bcc"] = sender
     msg["X-Priority"] = "1" if has_verified else "3"
 
     # Plain text fallback
@@ -485,11 +491,7 @@ def send_scan_email(db: Session, scan: Scan):
 
     try:
         server = _connect_smtp()
-        server.sendmail(
-            msg["From"],
-            [r.strip() for r in recipients.split(",")],
-            msg.as_string(),
-        )
+        server.sendmail(sender, envelope_to, msg.as_string())
         server.quit()
 
         _log_notification(db, scan.id, "email", subject, "sent")
@@ -523,10 +525,16 @@ def send_findings_report_email(db: Session, finding_ids: list[int]) -> tuple[boo
     # Build HTML
     html_body = _build_findings_report_html(db, findings)
 
+    sender = settings.alert_email_from or settings.smtp_username or f"iceleakmonitor@{settings.smtp_host}"
+    envelope_to = [r.strip() for r in recipients.split(",")]
+    if sender not in envelope_to:
+        envelope_to.append(sender)
+
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = settings.alert_email_from or settings.smtp_username or f"iceleakmonitor@{settings.smtp_host}"
+    msg["From"] = sender
     msg["To"] = recipients
+    msg["Bcc"] = sender
     msg["X-Priority"] = "1" if has_verified else "3"
 
     plain = (
@@ -539,11 +547,7 @@ def send_findings_report_email(db: Session, finding_ids: list[int]) -> tuple[boo
 
     try:
         server = _connect_smtp()
-        server.sendmail(
-            msg["From"],
-            [r.strip() for r in recipients.split(",")],
-            msg.as_string(),
-        )
+        server.sendmail(sender, envelope_to, msg.as_string())
         server.quit()
 
         _log_notification(db, None, "email", subject, "sent")
