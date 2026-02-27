@@ -44,7 +44,12 @@ def scan_cloned_repo(repo_path: str, repo_full_name: str, extra_patterns: list[t
     if extra_patterns:
         patterns.extend(extra_patterns)
 
-    compiled = [(name, re.compile(regex), sev) for name, regex, sev in patterns]
+    compiled = []
+    for name, regex, sev in patterns:
+        try:
+            compiled.append((name, re.compile(regex), sev))
+        except re.error as e:
+            logger.warning("Skipping invalid regex pattern '%s': %s", name, e)
 
     for root, dirs, files in os.walk(repo_path):
         # Skip irrelevant dirs

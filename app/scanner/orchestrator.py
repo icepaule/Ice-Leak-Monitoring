@@ -400,8 +400,9 @@ def run_scan_pipeline(db: Session, trigger_type: str = "manual"):
                     custom_keywords = db.query(Keyword).filter_by(
                         category="custom", is_active=1
                     ).all()
+                    import re as _re
                     extra_patterns = [
-                        (kw.term, kw.term, "medium") for kw in custom_keywords
+                        (kw.term, _re.escape(kw.term), "medium") for kw in custom_keywords
                     ]
                     scan_progress.update(3, message=f"Custom Patterns: {full_name}", current_item=full_name, count=ri, total=total)
                     scan_progress.add_log(f"Custom Scan: {full_name}")
