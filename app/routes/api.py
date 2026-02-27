@@ -1,7 +1,7 @@
 import threading
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -36,6 +36,126 @@ def trigger_scan(db: Session = Depends(get_db)):
     thread.start()
 
     return JSONResponse({"ok": True, "message": "Scan started"})
+
+
+@router.post("/scans/recover")
+def recover_scan(db: Session = Depends(get_db)):
+    """Resume a failed scan from Stage 3 (Repo-Analyse) in a background thread."""
+    if is_scan_running():
+        return JSONResponse({"ok": False, "message": "Scan already running"}, status_code=409)
+
+    # Find failed/running scan to recover
+    from app.models import Scan as ScanModel
+    scan = db.query(ScanModel).filter(ScanModel.status.in_(["failed", "running"])).order_by(ScanModel.id.desc()).first()
+    if not scan:
+        return JSONResponse({"ok": False, "message": "Kein fehlgeschlagener Scan gefunden"}, status_code=404)
+
+    scan_id = scan.id
+
+    def _run_recovery():
+        from app.scanner.recovery import run_recovery
+        _db = SessionLocal()
+        try:
+            run_recovery(_db, scan_id)
+        except Exception:
+            logger.exception("Recovery failed")
+        finally:
+            _db.close()
+
+    thread = threading.Thread(target=_run_recovery, daemon=True)
+    thread.start()
+
+    return JSONResponse({"ok": True, "message": f"Recovery fuer Scan #{scan_id} gestartet"})
+
+
+@router.post("/scans/reassess")
+def reassess_findings_endpoint(db: Session = Depends(get_db)):
+    """Re-run AI assessment on all open findings with updated prompt (incl. matched_snippet)."""
+    if is_scan_running():
+        return JSONResponse({"ok": False, "message": "Scan already running"}, status_code=409)
+
+    def _run_reassess():
+        from app.scanner.recovery import reassess_findings
+        _db = SessionLocal()
+        try:
+            reassess_findings(_db)
+        except Exception:
+            logger.exception("Reassessment failed")
+        finally:
+            _db.close()
+
+    thread = threading.Thread(target=_run_reassess, daemon=True)
+    thread.start()
+
+    return JSONResponse({"ok": True, "message": "AI-Reassessment gestartet"})
+
+
+@router.post("/findings/{finding_id}/rescan")
+def rescan_finding_endpoint(finding_id: int, db: Session = Depends(get_db)):
+    """Re-scan a single finding's repo to verify if it still exists."""
+    if is_scan_running():
+        return JSONResponse({"ok": False, "message": "Scan laeuft bereits"}, status_code=409)
+
+    finding = db.query(Finding).get(finding_id)
+    if not finding:
+        return JSONResponse({"ok": False, "message": "Finding nicht gefunden"}, status_code=404)
+
+    def _run_rescan():
+        from app.scanner.recovery import rescan_finding
+        _db = SessionLocal()
+        try:
+            rescan_finding(_db, finding_id)
+        except Exception:
+            logger.exception("Re-Scan failed for finding #%d", finding_id)
+        finally:
+            _db.close()
+
+    thread = threading.Thread(target=_run_rescan, daemon=True)
+    thread.start()
+
+    return JSONResponse({"ok": True, "message": f"Re-Scan fuer Finding #{finding_id} gestartet"})
+
+
+@router.post("/findings/rescan-all")
+def rescan_all_findings_endpoint(db: Session = Depends(get_db)):
+    """Re-scan ALL open findings to verify they still exist and backfill matched_snippet."""
+    if is_scan_running():
+        return JSONResponse({"ok": False, "message": "Scan laeuft bereits"}, status_code=409)
+
+    open_count = db.query(Finding).filter_by(is_resolved=0).count()
+    if not open_count:
+        return JSONResponse({"ok": False, "message": "Keine offenen Findings vorhanden"}, status_code=404)
+
+    def _run_rescan_all():
+        from app.scanner.recovery import rescan_all_findings
+        _db = SessionLocal()
+        try:
+            rescan_all_findings(_db)
+        except Exception:
+            logger.exception("Re-Scan All failed")
+        finally:
+            _db.close()
+
+    thread = threading.Thread(target=_run_rescan_all, daemon=True)
+    thread.start()
+
+    return JSONResponse({"ok": True, "message": f"Re-Scan fuer {open_count} offene Findings gestartet"})
+
+
+@router.post("/findings/email-report")
+async def findings_email_report(request: Request, db: Session = Depends(get_db)):
+    """Send email report for selected findings."""
+    body = await request.json()
+    finding_ids = body.get("finding_ids", [])
+    if not finding_ids:
+        return JSONResponse({"ok": False, "message": "Keine Findings ausgewaehlt"}, status_code=400)
+
+    from app.notifications.email_notify import send_findings_report_email
+    success, message = send_findings_report_email(db, finding_ids)
+    if success:
+        return JSONResponse({"ok": True, "message": message})
+    else:
+        return JSONResponse({"ok": False, "message": message}, status_code=500)
 
 
 @router.post("/scans/cancel")

@@ -82,7 +82,7 @@
                         <summary class="text-muted">{{ m.files_list|length }} Datei(en) anzeigen</summary>
                         <ul class="match-files">
                             {% for f in m.files_list %}
-                            <li><code>{{ f }}</code></li>
+                            <li><a href="https://github.com/{{ repo.full_name }}/blob/{{ repo.default_branch or 'main' }}/{{ f }}" target="_blank"><code>{{ f }}</code></a></li>
                             {% endfor %}
                         </ul>
                     </details>
@@ -137,7 +137,17 @@
                 <td>{{ f.id }}</td>
                 <td>{{ f.scanner }}</td>
                 <td><code>{{ f.detector_name }}</code></td>
-                <td><code>{{ f.file_path or '-' }}</code></td>
+                <td>
+                    {% if f.file_path %}
+                    {% if f.commit_hash %}
+                    <a href="https://github.com/{{ repo.full_name }}/blob/{{ f.commit_hash }}/{{ f.file_path }}" target="_blank" title="{{ f.file_path }}"><code>{{ f.file_path[:40] }}{% if f.file_path|length > 40 %}…{% endif %}</code></a>
+                    {% else %}
+                    <a href="https://github.com/{{ repo.full_name }}/blob/{{ repo.default_branch or 'main' }}/{{ f.file_path }}" target="_blank" title="{{ f.file_path }}"><code>{{ f.file_path[:40] }}{% if f.file_path|length > 40 %}…{% endif %}</code></a>
+                    {% endif %}
+                    {% else %}
+                    <code>-</code>
+                    {% endif %}
+                </td>
                 <td>{{ f.line_number or '-' }}</td>
                 <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
                 <td>{{ "Ja" if f.verified else "Nein" }}</td>

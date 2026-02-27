@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Keyword, Scan, DiscoveredRepo, Finding, RepoKeywordMatch, ModuleSetting
+from app.models import Keyword, Scan, DiscoveredRepo, Finding, RepoKeywordMatch, ModuleSetting, AppSetting
 from app.scanner.github_search import search_code_for_keyword, get_repo_details, get_repo_readme
 from app.scanner.trufflehog import scan_repo as trufflehog_scan
 from app.scanner.gitleaks import scan_cloned_repo as gitleaks_scan
@@ -31,6 +31,31 @@ def is_scan_running() -> bool:
 
 def _utcnow_str() -> str:
     return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds")
+
+
+def _build_keyword_context(db: Session, repo_id: int) -> str:
+    """Build keyword context string from RepoKeywordMatch records."""
+    matches = db.query(RepoKeywordMatch).filter_by(repo_id=repo_id).all()
+    if not matches:
+        return "Kein Keyword-Kontext verfuegbar"
+    lines = []
+    for m in matches:
+        files = ""
+        if m.match_files:
+            try:
+                flist = json.loads(m.match_files)
+                if flist:
+                    files = f" (Dateien: {', '.join(flist[:5])})"
+            except Exception:
+                pass
+        lines.append(f"- Keyword '{m.keyword}' via {m.match_source}{files}")
+    return "\n".join(lines)
+
+
+def _load_custom_prompt(db: Session) -> str:
+    """Load custom finding prompt from AppSetting, or return empty string for default."""
+    setting = db.query(AppSetting).filter_by(key="finding_prompt").first()
+    return setting.value if setting and setting.value else ""
 
 
 def _clone_repo(repo_url: str, dest_path: str, timeout: int = 120) -> bool:
@@ -89,6 +114,8 @@ def _insert_finding(db: Session, finding_data: dict, repo: DiscoveredRepo, scan:
     existing = db.query(Finding).filter_by(finding_hash=finding_data["finding_hash"]).first()
     if existing:
         existing.last_seen_at = _utcnow_str()
+        if not existing.matched_snippet and finding_data.get("matched_snippet"):
+            existing.matched_snippet = finding_data["matched_snippet"]
         db.flush()
         return False
 
@@ -103,6 +130,7 @@ def _insert_finding(db: Session, finding_data: dict, repo: DiscoveredRepo, scan:
         commit_hash=finding_data.get("commit_hash", ""),
         line_number=finding_data.get("line_number", 0),
         severity=finding_data.get("severity", "medium"),
+        matched_snippet=finding_data.get("matched_snippet", ""),
     )
     db.add(finding)
     db.flush()
@@ -424,6 +452,9 @@ def run_scan_pipeline(db: Session, trigger_type: str = "manual"):
             new_repo_findings = db.query(Finding).filter_by(
                 scan_id=scan.id, repo_id=repo_obj.id, ai_assessment=None
             ).all()
+            if new_repo_findings:
+                kw_context = _build_keyword_context(db, repo_obj.id)
+                custom_prompt = _load_custom_prompt(db)
             for finding in new_repo_findings:
                 scan_progress.add_activity("ollama", f"AI-Assessment: {full_name} / {finding.detector_name}")
                 assessment = assess_finding(
@@ -433,6 +464,9 @@ def run_scan_pipeline(db: Session, trigger_type: str = "manual"):
                     repo_name=full_name,
                     repo_description=repo_obj.description or "",
                     verified=bool(finding.verified),
+                    matched_snippet=finding.matched_snippet or "",
+                    keyword_context=kw_context,
+                    custom_prompt=custom_prompt,
                 )
                 if assessment:
                     finding.ai_assessment = assessment

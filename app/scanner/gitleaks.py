@@ -72,6 +72,7 @@ def scan_cloned_repo(repo_path: str, repo_full_name: str) -> list[dict]:
                     "commit_hash": commit,
                     "line_number": line_num,
                     "severity": severity,
+                    "matched_snippet": entry.get("Match", "")[:500],
                 })
 
         logger.info("Gitleaks scan of %s: %d findings", repo_full_name, len(findings))

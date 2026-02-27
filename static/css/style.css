@@ -225,6 +225,25 @@ h2 {
     border-radius: 4px;
 }
 
+/* === Snippet (Fund) === */
+.snippet-short {
+    display: inline-block;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 2px 4px;
+    background: var(--bg-input);
+    border-radius: 3px;
+}
+.snippet-short.snippet-expanded {
+    max-width: none;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
 /* === Badges === */
 .badge {
     display: inline-block;

@@ -25,29 +25,54 @@ Score-Leitfaden:
 - 0.9-1.0: Sehr wahrscheinlich vertrauliche Daten"""
 
 
-FINDING_ASSESSMENT_PROMPT = """Du bist CISO-Berater fuer die Muenchener Hypothekenbank eG.
-Bewerte dieses Finding aus einem GitHub Data-Leak-Scan.
+FINDING_ASSESSMENT_PROMPT = """Du bist CISO-Berater fuer die Muenchener Hypothekenbank eG (MHB).
+Ein automatisierter GitHub Data-Leak-Scanner hat folgenden Fund gemeldet.
+Deine Bewertung wird direkt vom ITSO und CISO der Bank gelesen, um ueber
+weitere Massnahmen zur Gefahrenabwehr zu entscheiden.
 
+--- FAKTENGRUNDLAGE ---
 Scanner: {scanner}
 Detektor: {detector_name}
 Datei: {file_path}
 Repository: {repo_name}
 Repository-Beschreibung: {repo_description}
-Verifiziert: {verified}
+Verifiziert durch Scanner: {verified}
 
-Erstelle eine strukturierte Bewertung mit folgenden Punkten:
+Konkret erkannter String (der eigentliche Fund):
+```
+{matched_snippet}
+```
+--- ENDE FAKTENGRUNDLAGE ---
 
-1. **Klassifizierung**: Echtes Datenleck, False Positive, oder unklar?
-2. **Schweregrad**: Critical / High / Medium / Low / Info
-3. **MITRE ATT&CK**: Zuordnung zu relevanten Techniken (z.B. T1552 - Unsecured Credentials, T1078 - Valid Accounts)
-4. **DORA-Relevanz**: Bewertung nach Digital Operational Resilience Act (Artikel 5-15):
+{keyword_context}
+
+WICHTIG: Beziehe dich in JEDEM Bewertungspunkt explizit auf den konkreten Fund oben.
+Nenne den erkannten String oder relevante Teile daraus woertlich, damit die Bewertung
+ohne Rueckgriff auf andere Systeme nachvollziehbar ist.
+
+Erstelle eine strukturierte Bewertung:
+
+0. **Erkennungskette**: Ueber welches Keyword wurde das Repo entdeckt?
+   In welchen Dateien taucht es auf? Ist der Zusammenhang zum Fund plausibel?
+1. **Fund-Analyse**: Was genau wurde gefunden? Zitiere den erkannten String und erklaere,
+   was er darstellt (z.B. API-Key, Passwort, IBAN, interner Hostname, Zertifikat).
+2. **Klassifizierung**: Echtes Datenleck, False Positive, oder unklar?
+   Begruende anhand des konkreten Strings warum.
+3. **Schweregrad**: Critical / High / Medium / Low / Info — mit Begruendung
+4. **Risikobewertung fuer MHB**: Welches konkrete Risiko entsteht fuer die Bank,
+   wenn dieser Fund von Angreifern ausgenutzt wird? (z.B. Kontozugriff, Lateral Movement,
+   Reputationsschaden, Compliance-Verstoss)
+5. **MITRE ATT&CK**: Zuordnung zu relevanten Techniken (z.B. T1552 - Unsecured Credentials)
+6. **DORA-Relevanz**: Bewertung nach Digital Operational Resilience Act:
    - ICT-Risikomanagement (Art. 5-16)
    - ICT-bezogene Vorfaelle (Art. 17-23)
    - Drittparteien-Risiko (Art. 28-44) falls Lieferant betroffen
-5. **BaFin-Meldepflicht**: Einschaetzung ob eine Meldung nach MaRisk/BAIT erforderlich ist
-6. **Empfohlene Sofortmassnahmen**: Konkrete naechste Schritte
+7. **BaFin-Meldepflicht**: Einschaetzung ob eine Meldung nach MaRisk/BAIT erforderlich ist
+8. **Empfohlene Sofortmassnahmen**: Konkrete, priorisierte naechste Schritte
+   (z.B. Secret rotieren, Repo-Owner kontaktieren, BaFin informieren)
 
-Antworte auf Deutsch, strukturiert und praezise. Die Bewertung muss fuer den CISO der Bank verstaendlich und weiterleitbar sein."""
+Antworte auf Deutsch, strukturiert und praezise. Jeder Punkt muss fuer sich allein
+verstaendlich sein — der Leser hat keinen Zugriff auf den Scanner oder das Repository."""
 
 
 def assess_repo_relevance(repo_name: str, description: str, language: str, readme_excerpt: str) -> tuple[float, str]:
@@ -97,17 +122,33 @@ def assess_repo_relevance(repo_name: str, description: str, language: str, readm
 
 
 def assess_finding(scanner: str, detector_name: str, file_path: str,
-                   repo_name: str, repo_description: str, verified: bool) -> str:
+                   repo_name: str, repo_description: str, verified: bool,
+                   matched_snippet: str = "",
+                   keyword_context: str = "",
+                   custom_prompt: str = "") -> str:
     """Ask Ollama to assess a finding with MITRE/DORA/BaFin context.
     Returns assessment text or empty string on failure."""
     try:
-        prompt = FINDING_ASSESSMENT_PROMPT.format(
+        # Build keyword context section
+        kw_section = ""
+        if keyword_context:
+            kw_section = (
+                "--- ERKENNUNGSKONTEXT ---\n"
+                "Dieses Repository wurde durch folgende Keywords/Suchbegriffe entdeckt:\n"
+                f"{keyword_context}\n"
+                "--- ENDE ERKENNUNGSKONTEXT ---"
+            )
+
+        prompt_template = custom_prompt if custom_prompt else FINDING_ASSESSMENT_PROMPT
+        prompt = prompt_template.format(
             scanner=scanner,
             detector_name=detector_name,
             file_path=file_path or "Unbekannt",
             repo_name=repo_name,
             repo_description=repo_description or "Keine Beschreibung",
             verified="Ja" if verified else "Nein",
+            matched_snippet=matched_snippet or "Nicht verfuegbar",
+            keyword_context=kw_section,
         )
 
         resp = httpx.post(

@@ -197,7 +197,37 @@ Scans laufen automatisch taeglich (Standard: 03:00 UTC). Der Zeitplan wird in de
 
 ![Settings](screenshots/settings.png)
 
-Hier werden die OSINT-Module verwaltet.
+Hier werden E-Mail-Empfaenger, OSINT-Module und der AI-Bewertungsprompt verwaltet.
+
+### E-Mail-Empfaenger konfigurieren
+
+Im Abschnitt **"E-Mail-Empfaenger"** werden die Empfaenger fuer Scan-Berichte und Finding-Reports festgelegt:
+
+1. E-Mail-Adressen kommagetrennt eingeben (z.B. `ciso@firma.de, itsec@firma.de`)
+2. "Speichern" klicken
+3. Ab dem naechsten Scan oder Mail-Report werden die neuen Empfaenger verwendet
+
+> **Hinweis:** Dieser Wert ueberschreibt die `ALERT_EMAIL_TO` Einstellung aus der `.env`-Datei. Ist kein Wert in der UI gesetzt, wird der `.env`-Wert als Fallback verwendet.
+
+### AI-Bewertungsprompt (Prompt-Editor)
+
+![Settings Prompt](screenshots/settings_prompt.png)
+
+Der **AI-Bewertungsprompt** steuert, wie das lokale LLM (Ollama) einzelne Findings bewertet:
+
+- **Bearbeiten**: Prompt im Textfeld aendern und "Speichern" klicken
+- **Zuruecksetzen**: "Auf Standard zuruecksetzen" stellt den Original-Prompt wieder her
+- **Platzhalter**: Folgende Variablen werden automatisch ersetzt:
+  - `{scanner}` — Name des Scanners (TruffleHog/Gitleaks/Custom)
+  - `{detector_name}` — Erkennungstyp (z.B. "AWS API Key")
+  - `{file_path}` — Dateipfad im Repository
+  - `{repo_name}` — Repository-Name
+  - `{repo_description}` — Repository-Beschreibung
+  - `{verified}` — Ob das Secret verifiziert wurde
+  - `{matched_snippet}` — Erkannter Code-Ausschnitt
+  - `{keyword_context}` — Welche Keywords das Repo identifiziert haben
+
+Der Prompt wird beim naechsten Scan oder bei einem AI-Reassessment verwendet.
 
 ### OSINT-Module aktivieren/deaktivieren
 
@@ -231,6 +261,38 @@ Am Ende der Einstellungsseite werden die letzten OSINT-Ergebnisse in einer Tabel
 
 ---
 
+## 7. Finding-Mail-Report
+
+Auf der **Findings-Seite** koennen einzelne Findings per Checkbox ausgewaehlt und als E-Mail-Report versendet werden:
+
+1. Gewuenschte Findings per Checkbox auswaehlen (oder "Alle" ueber den Master-Checkbox)
+2. Der Zaehler zeigt die Anzahl der ausgewaehlten Findings
+3. "Mail-Report senden" klicken
+4. Es wird eine CISO-konforme HTML-Mail an die konfigurierten Empfaenger gesendet
+
+Der Report enthaelt:
+- Severity-Zusammenfassung (Critical/High/Medium/Low)
+- Detaillierte Findings gruppiert nach Repository
+- KI-Bewertung mit MITRE ATT&CK, DORA und BaFin-Kontext
+- Regulatorische Hinweise
+
+---
+
+## 8. Keyword-Kette in AI-Bewertungen
+
+Der Ice-Leak-Monitor bildet eine vollstaendige **Erkennungskette** von Keywords bis zu Findings ab:
+
+```
+Keyword → GitHub Code Search → Repository gefunden → Deep Scan → Finding entdeckt → AI-Bewertung
+```
+
+In der AI-Bewertung jedes Findings wird dokumentiert, **welche Keywords** das Repository identifiziert haben. Dies ermoeglicht:
+- **Nachvollziehbarkeit**: Warum wurde dieses Repo gescannt?
+- **Kontext fuer den CISO**: Bezug zum Unternehmen (Firmenname, Domain, Dienstleister)
+- **Regulatorische Zuordnung**: DORA/BaFin-Relevanz basierend auf dem Keyword-Kontext
+
+---
+
 ## Tipps & Best Practices
 
 1. **Spezifische Keywords verwenden** - "firma.de" statt "firma" reduziert False Positives
@@ -238,3 +300,5 @@ Am Ende der Einstellungsseite werden die letzten OSINT-Ergebnisse in einer Tabel
 3. **False Positives markieren** - Verbessert die Uebersicht bei wiederholten Scans
 4. **Regelmaessig pruefen** - Der automatische Scan laeuft taeglich, neue Findings sollten zeitnah bewertet werden
 5. **AI-Score beachten** - Repos mit Score unter 30% werden automatisch als "low relevance" markiert
+6. **E-Mail-Empfaenger aktuell halten** - Empfaenger koennen direkt in der Settings-UI geaendert werden
+7. **Prompt anpassen** - Der AI-Bewertungsprompt kann fuer spezifische Branchen oder Compliance-Anforderungen angepasst werden

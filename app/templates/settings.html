@@ -58,6 +58,28 @@
     </div>
 </div>
 
+<!-- E-Mail-Empfaenger -->
+<div class="card settings-card">
+    <h2>E-Mail-Empfaenger</h2>
+    <p class="settings-desc">Empfaenger fuer Scan-Berichte und Finding-Reports (kommagetrennt).</p>
+    <div style="display:flex; gap:0.5rem; align-items:center;">
+        <input type="text" id="email-recipients" class="input" style="flex:1; font-family:monospace; font-size:0.85rem; background:#2d333b; color:#cdd9e5; border:1px solid #444c56; border-radius:4px; padding:0.5rem 0.75rem;" value="{{ email_recipients }}" placeholder="ciso@example.com, it-sec@example.com">
+        <button class="btn btn-primary" onclick="saveEmailRecipients()">Speichern</button>
+    </div>
+</div>
+
+<!-- AI Prompt Editor -->
+<div class="card settings-card">
+    <h2>AI-Bewertungsprompt</h2>
+    <p class="settings-desc">Prompt fuer die CISO-Bewertung von Findings. Wird beim naechsten Scan oder Reassessment verwendet.</p>
+    <textarea id="finding-prompt" rows="25" style="width:100%; font-family:monospace; font-size:0.85rem; background:#2d333b; color:#cdd9e5; border:1px solid #444c56; border-radius:4px; padding:0.75rem; resize:vertical;">{{ finding_prompt }}</textarea>
+    <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+        <button class="btn btn-primary" onclick="savePrompt()">Speichern</button>
+        <button class="btn btn-secondary" onclick="resetPrompt()">Auf Standard zuruecksetzen</button>
+    </div>
+    <p class="settings-desc" style="margin-top:0.5rem;">Platzhalter: <code>{scanner}</code>, <code>{detector_name}</code>, <code>{file_path}</code>, <code>{repo_name}</code>, <code>{repo_description}</code>, <code>{verified}</code>, <code>{matched_snippet}</code>, <code>{keyword_context}</code></p>
+</div>
+
 <!-- OSINT Results -->
 <div class="card">
     <h2>OSINT-Ergebnisse</h2>

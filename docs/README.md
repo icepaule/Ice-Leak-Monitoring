@@ -17,8 +17,10 @@ Ice-Leak-Monitor ueberwacht kontinuierlich GitHub auf unbeabsichtigt veroeffentl
 | Seite | Beschreibung |
 |-------|-------------|
 | ![Dashboard](screenshots/dashboard.png) | Dashboard mit Live Scan Monitor (5 Stages) |
-| ![Settings](screenshots/settings.png) | OSINT-Modul Einstellungen |
+| ![Settings](screenshots/settings.png) | Einstellungen: E-Mail-Empfaenger + OSINT-Module |
+| ![Settings Prompt](screenshots/settings_prompt.png) | AI-Bewertungsprompt Editor |
 | ![Keywords](screenshots/keywords.png) | Keyword-Verwaltung |
 | ![Repos](screenshots/repos.png) | Gefundene Repositories mit AI-Override |
-| ![Findings](screenshots/findings.png) | Security Findings |
+| ![Repo Detail](screenshots/repo_detail.png) | Repository-Detailseite mit Keyword-Matches |
+| ![Findings](screenshots/findings.png) | Security Findings mit Mail-Report |
 | ![Scans](screenshots/scans.png) | Scan-Verlauf |

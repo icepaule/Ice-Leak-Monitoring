@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Finding, DiscoveredRepo
+from app.models import Finding, DiscoveredRepo, RepoKeywordMatch
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -41,12 +41,24 @@ def findings_page(
     for f in findings:
         f.repo = db.query(DiscoveredRepo).get(f.repo_id)
 
+    # Load keyword matches grouped by repo_id
+    repo_ids = list({f.repo_id for f in findings})
+    keyword_map = {}
+    if repo_ids:
+        kw_matches = db.query(RepoKeywordMatch).filter(RepoKeywordMatch.repo_id.in_(repo_ids)).all()
+        for m in kw_matches:
+            keyword_map.setdefault(m.repo_id, []).append(m.keyword)
+        # Deduplicate keywords per repo
+        for rid in keyword_map:
+            keyword_map[rid] = list(dict.fromkeys(keyword_map[rid]))
+
     return templates.TemplateResponse("findings.html", {
         "request": request,
         "findings": findings,
         "current_scanner": scanner,
         "current_severity": severity,
         "current_status": status,
+        "keyword_map": keyword_map,
     })
 
 

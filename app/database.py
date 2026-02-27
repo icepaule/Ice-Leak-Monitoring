@@ -15,6 +15,7 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA busy_timeout=30000")
     cursor.close()
 
 
@@ -51,6 +52,12 @@ def _migrate_db():
     for col_name, sql in migrations:
         if col_name not in existing:
             cursor.execute(sql)
+
+    # findings table migrations
+    cursor.execute("PRAGMA table_info(findings)")
+    existing_findings = {row[1] for row in cursor.fetchall()}
+    if "matched_snippet" not in existing_findings:
+        cursor.execute("ALTER TABLE findings ADD COLUMN matched_snippet TEXT")
 
     conn.commit()
     conn.close()

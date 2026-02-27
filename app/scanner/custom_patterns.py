@@ -16,7 +16,7 @@ BUILTIN_PATTERNS: list[tuple[str, str, str]] = [
     ("Internal IP Range", r"\b10\.10\.\d{1,3}\.\d{1,3}\b", "medium"),
     ("Internal IP 172", r"\b172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b", "low"),
     ("Private Key Header", r"-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----", "critical"),
-    ("German ID Number", r"\b[A-Z0-9]{9,10}\b.{0,20}(?i)(personalausweis|ausweisnummer)", "high"),
+    ("German ID Number", r"(?i)\b[A-Z0-9]{9,10}\b.{0,20}(personalausweis|ausweisnummer)", "high"),
 ]
 
 # File extensions to scan
@@ -74,7 +74,9 @@ def scan_cloned_repo(repo_path: str, repo_full_name: str, extra_patterns: list[t
                 with open(fpath, "r", errors="ignore") as f:
                     for line_num, line_text in enumerate(f, start=1):
                         for pattern_name, regex, severity in compiled:
-                            if regex.search(line_text):
+                            match = regex.search(line_text)
+                            if match:
+                                snippet = line_text.strip()[:500]
                                 finding_hash = _make_finding_hash(
                                     pattern_name, repo_full_name, rel_path, line_num
                                 )
@@ -87,6 +89,7 @@ def scan_cloned_repo(repo_path: str, repo_full_name: str, extra_patterns: list[t
                                     "commit_hash": "",
                                     "line_number": line_num,
                                     "severity": severity,
+                                    "matched_snippet": snippet,
                                 })
             except Exception:
                 continue

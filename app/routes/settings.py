@@ -10,7 +10,9 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ModuleSetting, OsintResult
+from app.config import settings as app_settings
+from app.models import ModuleSetting, OsintResult, AppSetting
+from app.scanner.ollama_reviewer import FINDING_ASSESSMENT_PROMPT
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -43,6 +45,14 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
             "updated_at": m.updated_at,
         })
 
+    # Load custom finding prompt
+    prompt_setting = db.query(AppSetting).filter_by(key="finding_prompt").first()
+    finding_prompt = prompt_setting.value if prompt_setting and prompt_setting.value else FINDING_ASSESSMENT_PROMPT
+
+    # Load email recipients (DB overrides .env)
+    email_setting = db.query(AppSetting).filter_by(key="alert_email_to").first()
+    email_recipients = email_setting.value if email_setting and email_setting.value else app_settings.alert_email_to
+
     # Recent OSINT results
     recent_results = db.query(OsintResult).order_by(OsintResult.id.desc()).limit(50).all()
 
@@ -50,6 +60,8 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
         "request": request,
         "modules": module_list,
         "recent_results": recent_results,
+        "finding_prompt": finding_prompt,
+        "email_recipients": email_recipients,
     })
 
 
@@ -105,6 +117,62 @@ async def save_module_config(module_key: str, request: Request, db: Session = De
         "module_key": module_key,
         "has_api_key": bool(config.get("api_key")),
     })
+
+
+@router.post("/settings/email-recipients")
+async def save_email_recipients(request: Request, db: Session = Depends(get_db)):
+    """Save email recipients for scan reports."""
+    body = await request.json()
+    recipients = body.get("recipients", "").strip()
+    if not recipients:
+        return JSONResponse({"ok": False, "message": "Mindestens eine E-Mail-Adresse angeben"}, status_code=400)
+
+    setting = db.query(AppSetting).filter_by(key="alert_email_to").first()
+    now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds")
+    if setting:
+        setting.value = recipients
+        setting.updated_at = now
+    else:
+        setting = AppSetting(key="alert_email_to", value=recipients, updated_at=now)
+        db.add(setting)
+    db.commit()
+
+    logger.info("Email recipients updated to: %s", recipients)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/settings/prompts/finding")
+async def save_finding_prompt(request: Request, db: Session = Depends(get_db)):
+    """Save custom finding assessment prompt."""
+    body = await request.json()
+    prompt_text = body.get("prompt", "").strip()
+    if not prompt_text:
+        return JSONResponse({"ok": False, "message": "Prompt darf nicht leer sein"}, status_code=400)
+
+    setting = db.query(AppSetting).filter_by(key="finding_prompt").first()
+    now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds")
+    if setting:
+        setting.value = prompt_text
+        setting.updated_at = now
+    else:
+        setting = AppSetting(key="finding_prompt", value=prompt_text, updated_at=now)
+        db.add(setting)
+    db.commit()
+
+    logger.info("Finding prompt updated")
+    return JSONResponse({"ok": True})
+
+
+@router.post("/settings/prompts/finding/reset")
+def reset_finding_prompt(db: Session = Depends(get_db)):
+    """Reset finding prompt to default."""
+    setting = db.query(AppSetting).filter_by(key="finding_prompt").first()
+    if setting:
+        db.delete(setting)
+        db.commit()
+
+    logger.info("Finding prompt reset to default")
+    return JSONResponse({"ok": True, "prompt": FINDING_ASSESSMENT_PROMPT})
 
 
 def _mask_key(key: str) -> str:

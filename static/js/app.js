@@ -51,6 +51,40 @@ async function triggerScan() {
     }
 }
 
+// --- AI Reassessment ---
+async function triggerReassess() {
+    if (!confirm('Alle offenen Findings mit dem neuen AI-Prompt neu bewerten?')) return;
+
+    var btn = document.getElementById('btn-reassess');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Reassessment laeuft...';
+    }
+
+    try {
+        var resp = await fetch('/api/scans/reassess', { method: 'POST' });
+        var data = await resp.json();
+
+        if (data.ok) {
+            showIndicator(true);
+            if (btn) btn.textContent = 'Reassessment laeuft...';
+            startPolling();
+        } else {
+            alert(data.message || 'Reassessment konnte nicht gestartet werden');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'AI-Reassessment';
+            }
+        }
+    } catch (e) {
+        alert('Fehler: ' + e.message);
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'AI-Reassessment';
+        }
+    }
+}
+
 // --- Scan Cancel ---
 async function cancelScan() {
     var cancelBtn = document.getElementById('btn-cancel-scan');
@@ -312,6 +346,45 @@ async function deleteKeyword(id) {
     }
 }
 
+// --- Re-Scan Finding ---
+async function rescanFinding(id) {
+    if (!confirm('Finding #' + id + ' im Repo neu scannen?')) return;
+
+    try {
+        var resp = await fetch('/api/findings/' + id + '/rescan', { method: 'POST' });
+        var data = await resp.json();
+
+        if (data.ok) {
+            showIndicator(true);
+            startPolling();
+        } else {
+            alert(data.message || 'Re-Scan konnte nicht gestartet werden');
+        }
+    } catch (e) {
+        alert('Fehler: ' + e.message);
+    }
+}
+
+// --- Re-Scan ALL Findings ---
+async function rescanAllFindings() {
+    if (!confirm('Alle offenen Findings in ihren Repos neu scannen? (Kann einige Minuten dauern)')) return;
+
+    try {
+        var resp = await fetch('/api/findings/rescan-all', { method: 'POST' });
+        var data = await resp.json();
+
+        if (data.ok) {
+            showIndicator(true);
+            showCancelButton(true);
+            startPolling();
+        } else {
+            alert(data.message || 'Re-Scan konnte nicht gestartet werden');
+        }
+    } catch (e) {
+        alert('Fehler: ' + e.message);
+    }
+}
+
 // --- Findings ---
 async function toggleFinding(id) {
     var notes = prompt('Notiz (optional):') || '';
@@ -484,6 +557,128 @@ async function saveModuleConfig(key) {
                     status.textContent = 'Key konfiguriert';
                 }
             }
+        }
+    } catch (e) {
+        alert('Fehler: ' + e.message);
+    }
+}
+
+// --- Finding Mail-Report ---
+function toggleSelectAll(master) {
+    var cbs = document.querySelectorAll('.finding-cb');
+    for (var i = 0; i < cbs.length; i++) {
+        cbs[i].checked = master.checked;
+    }
+    updateSelectedCount();
+}
+
+function updateSelectedCount() {
+    var cbs = document.querySelectorAll('.finding-cb:checked');
+    var span = document.getElementById('selected-count');
+    if (span) {
+        span.textContent = cbs.length > 0 ? cbs.length + ' Finding(s) ausgewaehlt' : '';
+    }
+}
+
+async function sendFindingsReport() {
+    var cbs = document.querySelectorAll('.finding-cb:checked');
+    if (cbs.length === 0) {
+        alert('Bitte mindestens ein Finding auswaehlen');
+        return;
+    }
+
+    var ids = [];
+    for (var i = 0; i < cbs.length; i++) {
+        ids.push(parseInt(cbs[i].value, 10));
+    }
+
+    if (!confirm('Mail-Report fuer ' + ids.length + ' Finding(s) senden?')) return;
+
+    try {
+        var resp = await fetch('/api/findings/email-report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ finding_ids: ids }),
+        });
+        var data = await resp.json();
+        if (data.ok) {
+            alert(data.message || 'E-Mail gesendet');
+        } else {
+            alert(data.message || 'Fehler beim Senden');
+        }
+    } catch (e) {
+        alert('Fehler: ' + e.message);
+    }
+}
+
+// --- Email Recipients ---
+async function saveEmailRecipients() {
+    var input = document.getElementById('email-recipients');
+    if (!input) return;
+
+    var recipients = input.value.trim();
+    if (!recipients) {
+        alert('Mindestens eine E-Mail-Adresse angeben');
+        return;
+    }
+
+    try {
+        var resp = await fetch('/settings/email-recipients', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ recipients: recipients }),
+        });
+        var data = await resp.json();
+        if (data.ok) {
+            alert('E-Mail-Empfaenger gespeichert');
+        } else {
+            alert(data.message || 'Fehler beim Speichern');
+        }
+    } catch (e) {
+        alert('Fehler: ' + e.message);
+    }
+}
+
+// --- Prompt Editor ---
+async function savePrompt() {
+    var textarea = document.getElementById('finding-prompt');
+    if (!textarea) return;
+
+    var prompt = textarea.value.trim();
+    if (!prompt) {
+        alert('Prompt darf nicht leer sein');
+        return;
+    }
+
+    try {
+        var resp = await fetch('/settings/prompts/finding', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: prompt }),
+        });
+        var data = await resp.json();
+        if (data.ok) {
+            alert('Prompt gespeichert');
+        } else {
+            alert(data.message || 'Fehler beim Speichern');
+        }
+    } catch (e) {
+        alert('Fehler: ' + e.message);
+    }
+}
+
+async function resetPrompt() {
+    if (!confirm('Prompt auf Standard zuruecksetzen?')) return;
+
+    try {
+        var resp = await fetch('/settings/prompts/finding/reset', { method: 'POST' });
+        var data = await resp.json();
+        if (data.ok) {
+            var textarea = document.getElementById('finding-prompt');
+            if (textarea && data.prompt) {
+                textarea.value = data.prompt;
+            }
+            alert('Prompt auf Standard zurueckgesetzt');
         }
     } catch (e) {
         alert('Fehler: ' + e.message);

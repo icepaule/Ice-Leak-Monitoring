@@ -86,6 +86,7 @@ class Finding(Base):
     commit_hash = Column(Text)
     line_number = Column(Integer)
     severity = Column(Text, default="medium")
+    matched_snippet = Column(Text)  # erkannter String/Match-Kontext (max ~500 Zeichen)
     ai_assessment = Column(Text)
     first_seen_at = Column(Text, nullable=False, default=lambda: _utcnow().isoformat(sep=" ", timespec="seconds"))
     last_seen_at = Column(Text, nullable=False, default=lambda: _utcnow().isoformat(sep=" ", timespec="seconds"))
@@ -136,6 +137,14 @@ class ModuleSetting(Base):
     is_enabled = Column(Integer, default=0)  # 0=off, 1=on
     config_json = Column(Text)  # e.g. {"api_key":"..."} for Hunter.io/LeakCheck
     updated_at = Column(Text, default=lambda: _utcnow().isoformat(sep=" ", timespec="seconds"))
+
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key = Column(Text, primary_key=True)
+    value = Column(Text)
+    updated_at = Column(Text)
 
 
 class OsintResult(Base):
